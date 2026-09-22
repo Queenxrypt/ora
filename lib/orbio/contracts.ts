@@ -1,7 +1,11 @@
 export const ROBINHOOD_CHAIN_ID = 4663;
 
-export const ROBINHOOD_RPC =
-  process.env.ROBINHOOD_RPC_URL ?? "https://rpc.mainnet.chain.robinhood.com";
+const DEFAULT_ROBINHOOD_RPC = "https://rpc.mainnet.chain.robinhood.com";
+
+export function robinhoodRpcUrl(): string {
+  const configured = process.env.ROBINHOOD_RPC_URL?.trim();
+  return configured || DEFAULT_ROBINHOOD_RPC;
+}
 
 export const ORBIO_MARKET_ORIGIN =
   process.env.ORBIO_MARKET_ORIGIN ?? "https://www.orbio.so";

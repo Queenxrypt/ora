@@ -18,7 +18,11 @@ import {
   type Address,
   type WalletClient,
 } from "viem";
-import { CONTRACTS, ROBINHOOD_CHAIN_ID, ROBINHOOD_RPC } from "../orbio/contracts";
+import {
+  CONTRACTS,
+  ROBINHOOD_CHAIN_ID,
+  robinhoodRpcUrl,
+} from "../orbio/contracts";
 import { erc20Abi, robinhoodChain } from "../orbio/exchange";
 
 type WalletState = {
@@ -36,10 +40,17 @@ type WalletState = {
 
 const WalletContext = createContext<WalletState | null>(null);
 
-const publicClient = createPublicClient({
-  chain: robinhoodChain,
-  transport: http(ROBINHOOD_RPC),
-});
+let publicClient: ReturnType<typeof createPublicClient> | null = null;
+
+function getPublicClient() {
+  if (!publicClient) {
+    publicClient = createPublicClient({
+      chain: robinhoodChain,
+      transport: http(robinhoodRpcUrl()),
+    });
+  }
+  return publicClient;
+}
 
 type WalletSession = {
   address?: Address;
@@ -94,13 +105,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       return;
     }
     const [rawUsdg, rawEth] = await Promise.all([
-      publicClient.readContract({
+      getPublicClient().readContract({
         address: CONTRACTS.usdg,
         abi: erc20Abi,
         functionName: "balanceOf",
         args: [owner],
       }),
-      publicClient.getBalance({ address: owner }),
+      getPublicClient().getBalance({ address: owner }),
     ]);
     setUsdgBalance(Number(formatUnits(rawUsdg as bigint, 6)));
     setNativeBalance(Number(formatUnits(rawEth, 18)));
@@ -150,7 +161,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             chainId: "0x1237",
             chainName: "Robinhood Chain",
             nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-            rpcUrls: [ROBINHOOD_RPC],
+            rpcUrls: [robinhoodRpcUrl()],
             blockExplorerUrls: ["https://robinhoodchain.blockscout.com"],
           },
         ],

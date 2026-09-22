@@ -12,7 +12,7 @@ import { atomsToUnits, unitsToAtoms } from "./market";
 import {
   CONTRACTS,
   ROBINHOOD_CHAIN_ID,
-  ROBINHOOD_RPC,
+  robinhoodRpcUrl,
   TOKEN_DECIMALS,
 } from "./contracts";
 
@@ -23,7 +23,7 @@ export const robinhoodChain = defineChain({
   name: "Robinhood Chain",
   nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
   rpcUrls: {
-    default: { http: [ROBINHOOD_RPC] },
+    default: { http: [robinhoodRpcUrl()] },
   },
   blockExplorers: {
     default: {
@@ -73,7 +73,7 @@ export const erc20Abi = [
 export function publicClient() {
   return createPublicClient({
     chain: robinhoodChain,
-    transport: http(ROBINHOOD_RPC),
+    transport: http(robinhoodRpcUrl()),
   });
 }
 
