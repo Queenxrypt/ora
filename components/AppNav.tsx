@@ -28,6 +28,7 @@ export function AppNav() {
     connecting,
     connect,
     disconnect,
+    switchAccount,
     switchToRobinhood,
   } = useWallet();
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +85,15 @@ export function AppNav() {
                 Switch
               </button>
             )}
+            <button
+              className="btn secondary"
+              type="button"
+              onClick={() =>
+                void switchAccount().catch((err: Error) => setError(err.message))
+              }
+            >
+              Switch account
+            </button>
             <button className="btn secondary" type="button" onClick={disconnect}>
               Disconnect
             </button>

@@ -31,6 +31,7 @@ type WalletState = {
   connecting: boolean;
   connect: () => Promise<void>;
   disconnect: () => void;
+  switchAccount: () => Promise<void>;
   switchToRobinhood: () => Promise<void>;
   walletClient: WalletClient | null;
   usdgBalance: number | null;
@@ -145,6 +146,32 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setNativeBalance(null);
   }, [applySession]);
 
+  const switchAccount = useCallback(async () => {
+    const provider = window.ethereum;
+    if (!provider) throw new Error("No injected wallet found.");
+    try {
+      await provider.request({
+        method: "wallet_requestPermissions",
+        params: [{ eth_accounts: {} }],
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not switch account.";
+      throw new Error(message);
+    }
+    const current = await provider.request({ method: "eth_accounts" });
+    const account = Array.isArray(current) ? current[0] : undefined;
+    if (typeof account !== "string" || !account.trim()) {
+      throw new Error("No account selected.");
+    }
+    const client = clientFromInjected();
+    if (!client) throw new Error("No injected wallet found.");
+    const id = await client.getChainId();
+    setWalletClient(client);
+    applySession(account as Address, id);
+    await refreshBalance(account as Address);
+  }, [applySession, refreshBalance]);
+
   const switchToRobinhood = useCallback(async () => {
     const provider = window.ethereum;
     if (!provider) return;
@@ -172,6 +199,33 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       : Promise.resolve(ROBINHOOD_CHAIN_ID));
     applySession(address, id);
   }, [address, applySession, walletClient]);
+
+  useEffect(() => {
+    if (walletSession.address) return;
+    const provider = window.ethereum;
+    if (!provider) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const current = await provider.request({ method: "eth_accounts" });
+        const account = Array.isArray(current) ? current[0] : undefined;
+        if (cancelled || walletSession.address) return;
+        if (typeof account !== "string" || !account.trim()) return;
+        const client = clientFromInjected();
+        if (!client || cancelled) return;
+        const id = await client.getChainId();
+        if (cancelled || walletSession.address) return;
+        setWalletClient(client);
+        applySession(account as Address, id);
+        await refreshBalance(account as Address);
+      } catch {
+        // Stay disconnected. eth_accounts must not prompt.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [applySession, refreshBalance]);
 
   useEffect(() => {
     if (!walletSession.address || walletClient) return;
@@ -233,6 +287,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       connecting,
       connect,
       disconnect,
+      switchAccount,
       switchToRobinhood,
       walletClient,
       usdgBalance,
@@ -245,6 +300,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       connecting,
       connect,
       disconnect,
+      switchAccount,
       switchToRobinhood,
       walletClient,
       usdgBalance,
