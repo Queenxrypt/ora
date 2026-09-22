@@ -403,6 +403,7 @@ export function OraDeskPage() {
           setQuoteBook(null);
         }
         await loadRest();
+        if (validatedJson.code === "stale") scrollToReview();
         return;
       }
       const liveQuote = validatedJson.quote as ExecutableQuote;
