@@ -60,6 +60,8 @@ type WalletSession = {
 
 /** Survives WalletProvider remounts in the same JS context. Not a reconnect prompt. */
 let walletSession: WalletSession = {};
+/** Ora-level disconnect. A full reload clears this so eth_accounts can restore. */
+let localDisconnect = false;
 
 function writeSession(next: WalletSession) {
   walletSession = next;
@@ -140,6 +142,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [applySession, refreshBalance]);
 
   const disconnect = useCallback(() => {
+    localDisconnect = true;
     applySession(undefined, undefined);
     setWalletClient(null);
     setUsdgBalance(null);
@@ -227,7 +230,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [address, applySession, walletClient]);
 
   useEffect(() => {
-    if (walletSession.address) return;
+    if (localDisconnect || walletSession.address) return;
     const provider = window.ethereum;
     if (!provider) return;
     let cancelled = false;
@@ -235,12 +238,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       try {
         const current = await provider.request({ method: "eth_accounts" });
         const account = Array.isArray(current) ? current[0] : undefined;
-        if (cancelled || walletSession.address) return;
+        if (cancelled || localDisconnect || walletSession.address) return;
         if (typeof account !== "string" || !account.trim()) return;
         const client = clientFromInjected();
-        if (!client || cancelled) return;
+        if (!client || cancelled || localDisconnect) return;
         const id = await client.getChainId();
-        if (cancelled || walletSession.address) return;
+        if (cancelled || localDisconnect || walletSession.address) return;
         setWalletClient(client);
         applySession(account as Address, id);
         await refreshBalance(account as Address);
