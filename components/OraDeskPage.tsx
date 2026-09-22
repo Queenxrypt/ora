@@ -544,6 +544,10 @@ export function OraDeskPage() {
         return;
       }
       setProgress("");
+      setError(null);
+      setQuote(null);
+      setQuoteBook(null);
+      if (settledJson.record) setRecord(settledJson.record);
       setUi("success");
       await loadRest();
       await refreshBalance();
@@ -1159,11 +1163,11 @@ export function OraDeskPage() {
               <p className="success-copy">Purchase confirmed onchain.</p>
               <div className="row">
                 <span className="label">Acquired CREDIT</span>
-                <span className="value">{quote?.creditOut}</span>
+                <span className="value">{record?.creditAcquired}</span>
               </div>
               <div className="row">
                 <span className="label">Execution price</span>
-                <span className="value">{quote?.quotePrice}</span>
+                <span className="value">{record?.executionPrice ?? record?.quotePrice}</span>
               </div>
               <div className="row">
                 <span className="label">Transaction</span>
