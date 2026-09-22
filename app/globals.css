@@ -214,47 +214,9 @@ input {
   transform: translateY(-2px);
 }
 
-.market-preview-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  column-gap: 20px;
-  row-gap: 6px;
+.market-preview .kicker {
   margin: 0 0 4px;
 }
-
-.market-preview .kicker {
-  margin: 0;
-  flex: 1 0 auto;
-  white-space: nowrap;
-}
-
-.market-preview-by {
-  margin: 0 0 0 auto;
-  flex: 0 0 auto;
-  white-space: nowrap;
-  font-size: 9px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted);
-  opacity: 0.62;
-}
-
-.market-preview-foot {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 14px;
-}
-
-.market-preview-mark {
-  display: block;
-  width: 44px;
-  height: auto;
-  opacity: 0.72;
-}
-
 
 .preview-body {
   display: grid;
