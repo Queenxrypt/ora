@@ -600,12 +600,7 @@ export function OraDeskPage() {
   const recent = history.slice(0, 8);
   const minDiscount =
     settings?.minDiscountPercent ?? decision?.params.minDiscountPercent;
-  const activeDepthPercent =
-    minDiscount != null && market
-      ? (market.depth.find(
-          (level) => Math.abs(level.discountPercent - minDiscount) < 0.05,
-        )?.discountPercent ?? null)
-      : null;
+  const showDecide = !decision;
   const decisionWhy = decision?.reason ?? null;
   const meetsThreshold =
     minDiscount != null && market != null && market.bestDiscount >= minDiscount;
@@ -707,7 +702,7 @@ export function OraDeskPage() {
                 >
                   {market.bestDiscount}%
                 </p>
-                {minDiscount != null && (
+                {minDiscount != null && decision?.action !== "BUY" && (
                   <p
                     className={`command-threshold ${meetsThreshold ? "meets" : "below"}`}
                   >
@@ -741,17 +736,19 @@ export function OraDeskPage() {
                 )}
               </div>
               <div className="command-actions">
-                <button
-                  className="btn secondary command-ghost"
-                  type="button"
-                  disabled={ui === "decision_loading" || !isConnected}
-                  onClick={() => void persistDecision()}
-                >
-                  {ui === "decision_loading" ? "Deciding…" : "Decide"}
-                </button>
-                {decision?.action === "BUY" && (
+                {showDecide && (
                   <button
                     className="btn btn-action command-cta"
+                    type="button"
+                    disabled={ui === "decision_loading"}
+                    onClick={() => void persistDecision()}
+                  >
+                    {ui === "decision_loading" ? "Deciding…" : "Decide"}
+                  </button>
+                )}
+                {decision?.action === "BUY" && (
+                  <button
+                    className="btn btn-action command-cta command-review"
                     type="button"
                     disabled={Boolean(progress) && ui !== "review"}
                     onClick={() => void requestQuote()}
@@ -800,20 +797,19 @@ export function OraDeskPage() {
             {market.depth.length > 0 && (
               <div className="depth command-depth" aria-label="Market depth">
                 {market.depth.map((level, index) => {
-                  const isActive =
-                    activeDepthPercent != null &&
-                    level.discountPercent === activeDepthPercent;
+                  const qualifies =
+                    minDiscount != null &&
+                    level.discountPercent >= minDiscount;
                   return (
                     <div
-                      className={`depth-row${isActive ? " is-active" : ""}`}
+                      className={`depth-row${qualifies ? " is-qualifying" : " is-below"}`}
                       key={level.discountPercent}
                       style={{ animationDelay: `${index * 40}ms` }}
                     >
                       <span className="depth-label">
-                        {level.discountPercent}%
-                        {isActive && (
-                          <span className="depth-threshold">ORA THRESHOLD</span>
-                        )}
+                        <span className="depth-percent">
+                          {level.discountPercent}%
+                        </span>
                       </span>
                       <div className="bar">
                         <span
@@ -825,7 +821,9 @@ export function OraDeskPage() {
                           }}
                         />
                       </div>
-                      <span>{formatCredit(level.availableCredit)}</span>
+                      <span className="depth-credit">
+                        {formatCredit(level.availableCredit)}
+                      </span>
                     </div>
                   );
                 })}

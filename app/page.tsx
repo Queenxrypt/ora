@@ -1,3 +1,4 @@
+import { OraMark } from "../components/OraMark";
 import { readMarketSnapshot } from "../lib/orbio/market";
 import { formatCredit, formatPrice } from "../lib/ora/format";
 
@@ -28,7 +29,9 @@ export default async function LandingPage() {
 
         <section className="hero-row">
           <div className="hero">
-            <h1>ORA</h1>
+            <h1>
+              <OraMark className="hero-logo" />
+            </h1>
             <p className="tagline">Smarter procurement for Orbio CREDIT.</p>
             <p className="lede">
               An agent that watches the CREDIT market, decides when inference is
@@ -100,8 +103,8 @@ export default async function LandingPage() {
 
         <section className="thesis" aria-label="Product thesis">
           <p className="thesis-copy">
-            Inference is becoming a tradable economic resource. Ora gives agents
-            a way to reason about when they acquire it.
+            Orbio makes inference tradable through CREDIT. Ora gives agents a
+            smarter way to decide when to acquire it.
           </p>
           <aside className="thesis-diagram" aria-label="Inference, CREDIT, and procurement">
             <ol className="flow-chain">
