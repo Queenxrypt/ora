@@ -88,9 +88,11 @@ export function AppNav() {
             <button
               className="btn secondary"
               type="button"
-              onClick={() =>
-                void switchAccount().catch((err: Error) => setError(err.message))
-              }
+              onClick={() => {
+                void switchAccount()
+                  .then(() => setError(null))
+                  .catch((err: Error) => setError(err.message));
+              }}
             >
               Switch account
             </button>

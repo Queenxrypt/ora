@@ -149,27 +149,53 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const switchAccount = useCallback(async () => {
     const provider = window.ethereum;
     if (!provider) throw new Error("No injected wallet found.");
+    const previous = walletSession.address?.toLowerCase();
+    let permissionError: unknown = null;
     try {
       await provider.request({
         method: "wallet_requestPermissions",
         params: [{ eth_accounts: {} }],
       });
     } catch (err) {
+      permissionError = err;
+    }
+
+    let current: unknown;
+    try {
+      current = await provider.request({ method: "eth_accounts" });
+    } catch (err) {
+      if (!permissionError) throw err;
       const message =
-        err instanceof Error ? err.message : "Could not switch account.";
+        permissionError instanceof Error
+          ? permissionError.message
+          : "Could not switch account.";
       throw new Error(message);
     }
-    const current = await provider.request({ method: "eth_accounts" });
+
     const account = Array.isArray(current) ? current[0] : undefined;
-    if (typeof account !== "string" || !account.trim()) {
-      throw new Error("No account selected.");
+    const valid =
+      typeof account === "string" && account.trim()
+        ? (account as Address)
+        : undefined;
+    const changed = valid != null && valid.toLowerCase() !== previous;
+    if (valid && (!permissionError || changed)) {
+      const client = clientFromInjected();
+      if (!client) throw new Error("No injected wallet found.");
+      const id = await client.getChainId();
+      setWalletClient(client);
+      applySession(valid, id);
+      await refreshBalance(valid);
+      return;
     }
-    const client = clientFromInjected();
-    if (!client) throw new Error("No injected wallet found.");
-    const id = await client.getChainId();
-    setWalletClient(client);
-    applySession(account as Address, id);
-    await refreshBalance(account as Address);
+
+    if (permissionError) {
+      const message =
+        permissionError instanceof Error
+          ? permissionError.message
+          : "Could not switch account.";
+      throw new Error(message);
+    }
+    throw new Error("No account selected.");
   }, [applySession, refreshBalance]);
 
   const switchToRobinhood = useCallback(async () => {
