@@ -46,10 +46,13 @@ export default async function LandingPage() {
           </div>
 
           <aside className="market-preview" aria-label="Live CREDIT market">
-            <p className="kicker">
-              <span className="live-dot" aria-hidden="true" />
-              Live CREDIT market
-            </p>
+            <div className="market-preview-head">
+              <p className="kicker">
+                <span className="live-dot" aria-hidden="true" />
+                Live CREDIT market
+              </p>
+              <p className="market-preview-by">Powered by Orbio</p>
+            </div>
             {marketError && <p className="status">{marketError}</p>}
             {market && (
               <div className="preview-body">
@@ -73,6 +76,15 @@ export default async function LandingPage() {
                 </div>
               </div>
             )}
+            <div className="market-preview-foot">
+              <img
+                className="market-preview-mark"
+                src="/orbio-mark.jpg"
+                alt="Orbio"
+                width={400}
+                height={400}
+              />
+            </div>
           </aside>
         </section>
 
