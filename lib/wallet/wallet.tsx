@@ -191,19 +191,31 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       }
       void refreshBalance();
     };
+    const keepAccount = (account: Address) => {
+      const injected = clientFromInjected();
+      if (injected) setWalletClient(injected);
+      applySession(account, walletSession.chainId);
+      void refreshBalance(account);
+    };
     const onAccountsChanged = (accounts: unknown) => {
-      if (!Array.isArray(accounts) || accounts.length === 0) {
-        disconnect();
+      const next = Array.isArray(accounts) ? accounts[0] : undefined;
+      if (typeof next === "string") {
+        keepAccount(next as Address);
         return;
       }
-      const next = accounts[0];
-      if (typeof next === "string") {
-        const account = next as Address;
-        const injected = clientFromInjected();
-        if (injected) setWalletClient(injected);
-        applySession(account, walletSession.chainId);
-        void refreshBalance(account);
-      }
+      void (async () => {
+        try {
+          const current = await provider.request({ method: "eth_accounts" });
+          const confirmed = Array.isArray(current) ? current[0] : undefined;
+          if (typeof confirmed === "string" && confirmed.trim()) {
+            keepAccount(confirmed as Address);
+            return;
+          }
+          if (Array.isArray(current) && current.length === 0) disconnect();
+        } catch {
+          // eth_accounts did not confirm that the wallet is disconnected.
+        }
+      })();
     };
 
     provider.on("chainChanged", onChainChanged);
