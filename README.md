@@ -1,10 +1,13 @@
 # Ora
 
-Ora is a procurement agent for Orbio CREDIT. It watches the CREDIT market and decides whether to BUY or WAIT based on procurement parameters set by the user.
+**Live app:** https://www.useora.site
+**Repository:** https://github.com/Queenxrypt/ora
+
+Ora is a procurement agent for Orbio CREDIT. It checks the live CREDIT market and decides whether to BUY or WAIT based on procurement parameters set by the user.
 
 ## What is Ora?
 
-Orbio makes inference tradable through CREDIT. Ora treats that CREDIT as a procurement decision: the user sets parameters, and Ora checks the live market against them. The decision is BUY or WAIT.
+Orbio makes inference tradable through CREDIT. Ora treats acquiring that CREDIT as a procurement decision: the user sets parameters, and Ora checks the live market against them. The decision is BUY or WAIT.
 
 ## How It Works
 
@@ -44,11 +47,15 @@ The deterministic rule is authoritative.
 
 ## Orbio Reasoning
 
-Orbio reasoning uses `ORBIO_API_KEY` on the server. It receives the market snapshot and the decision context (price, depth, requested CREDIT, minimum discount, spending limit, and the deterministic BUY or WAIT) and returns a short explanation.
+Orbio reasoning is part of Ora's agent workflow. Ora sends the live market context, procurement parameters, and the deterministic BUY or WAIT decision to Orbio, which provides a short explanation for why that decision makes sense.
 
-The rule makes the decision. Orbio provides a short explanation for why that decision makes sense.
+The deterministic procurement rule remains authoritative for the actual BUY/WAIT decision and execution safety. Orbio provides the reasoning layer without having unchecked control over spending, quotes, wallet actions, or transaction execution.
 
-Reasoning is advisory. It cannot change the BUY/WAIT result, the spending limit, the quote, the wallet, or transaction execution. If the reasoning call fails or `ORBIO_API_KEY` is missing, Ora still records the deterministic decision.
+The flow is:
+
+Market context → deterministic procurement rule → BUY/WAIT → Orbio reasoning → user review and execution.
+
+Ora uses ORBIO_API_KEY on the server for this reasoning layer. If the reasoning service is temporarily unavailable, Ora can still record and act on the deterministic decision. This fallback prevents a reasoning-service failure from blocking the procurement workflow.
 
 ## Purchase Safety
 
@@ -120,12 +127,14 @@ Copy `.env.example` to `.env.local` for local runs. Keep secret values out of th
 
 | Variable | Role |
 | --- | --- |
-| `ORBIO_API_KEY` | Server-side key for Orbio reasoning. If it is unset, reasoning is skipped and the deterministic decision still runs. |
+| `ORBIO_API_KEY` | Server-side key used by Ora's Orbio reasoning layer. |
 | `SUPABASE_URL` | Supabase project URL. Required to store decisions and settings. |
 | `SUPABASE_SECRET_KEY` | Server-side Supabase key. Required with `SUPABASE_URL`. |
 | `ROBINHOOD_RPC_URL` | Robinhood Chain RPC. Defaults to `https://rpc.mainnet.chain.robinhood.com`. |
 | `ORBIO_MARKET_ORIGIN` | Origin for the CREDIT order book. Defaults to `https://www.orbio.so`. |
 | `ORBIO_REASONING_MODEL` | Reasoning model id. Defaults to `google/gemini-3.8-flash` when unset. |
+
+ORBIO_API_KEY is required for Ora's Orbio reasoning layer. The deterministic procurement rule remains available if the reasoning service is temporarily unavailable.
 
 ## Local Development
 
@@ -157,17 +166,17 @@ Ora is a Next.js application deployed on Vercel. Set the environment variables i
 
 Ora currently does the following:
 
-- Live CREDIT market observation
+- Live CREDIT market checks
 - Deterministic BUY/WAIT procurement decisions
 - Configurable procurement parameters
-- Orbio reasoning
+- Orbio reasoning layer
 - Quote review and validation
 - User-approved CREDIT purchase
 - Execution confirmation
 - Decision history
 - Performance measurement
 
-That scope is CREDIT procurement on this desk: watch the book, decide BUY or WAIT, and complete a purchase only with the user's wallet.
+That scope is CREDIT procurement on this desk: check the book, decide BUY or WAIT, and complete a purchase only with the user's wallet.
 
 ## Roadmap
 
