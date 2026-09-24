@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
-import { quoteForCredit } from "../../../../lib/orbio/exchange";
+import { publicClient, quoteForCredit } from "../../../../lib/orbio/exchange";
 import { decide } from "../../../../lib/ora/decision";
+import { canReviewDecision } from "../../../../lib/ora/evaluation";
+import {
+  checkAmountAgainstMarket,
+  recordedQuoteAmount,
+} from "../../../../lib/ora/quote-amount";
 import { quoteMeetsMinDiscount } from "../../../../lib/ora/quote-rule";
 import {
   readSettings,
@@ -42,6 +47,15 @@ export async function POST(request: Request) {
     const access = await requireOwnedDecision(body.decisionId, wallet);
     if ("error" in access) return decisionAccessResponse(access.error);
     const current = access.record;
+    if (!canReviewDecision(current)) {
+      return NextResponse.json(
+        {
+          error: "A purchase for this decision is already in progress or finished. No transaction is offered.",
+          code: "not_signable",
+        },
+        { status: 409 },
+      );
+    }
     if (current.decision !== "BUY") {
       return NextResponse.json(
         {
@@ -52,10 +66,27 @@ export async function POST(request: Request) {
       );
     }
 
+    const recorded = recordedQuoteAmount(current);
+    if (!recorded.ok) {
+      return NextResponse.json(
+        { error: recorded.error, code: recorded.code },
+        { status: recorded.status },
+      );
+    }
+    if (body.quote.requestedCredit !== recorded.requestedCredit) {
+      return NextResponse.json(
+        {
+          error: "This quote is not for the CREDIT amount Ora decided. Review a fresh quote before sending.",
+          code: "stale",
+        },
+        { status: 409 },
+      );
+    }
+
     const settings = await readSettings(wallet);
     const market = await readMarketSnapshot();
 
-    if (body.quote.requestedCredit < market.minBuyCredit) {
+    if (recorded.requestedCredit < market.minBuyCredit) {
       return NextResponse.json(
         {
           error: `Minimum purchase is ${market.minBuyCredit} CREDIT.`,
@@ -100,7 +131,20 @@ export async function POST(request: Request) {
       );
     }
 
-    const fresh = await quoteForCredit(body.quote.requestedCredit);
+    const checked = checkAmountAgainstMarket(
+      recorded.requestedCredit,
+      market,
+      liveDecision.requestedAmount,
+    );
+    if (!checked.ok) {
+      return NextResponse.json(
+        { error: checked.error, code: checked.code },
+        { status: checked.status },
+      );
+    }
+    const requestedCredit = checked.requestedCredit;
+
+    const fresh = await quoteForCredit(requestedCredit);
 
     if (fresh.creditOut <= 0) {
       await updateOwnedDecision(body.decisionId, wallet, {
@@ -163,11 +207,22 @@ export async function POST(request: Request) {
       );
     }
 
+    const validatedBlock = await publicClient().getBlockNumber().catch(() => null);
+    if (validatedBlock == null) {
+      return NextResponse.json(
+        {
+          error: "Could not read the current Robinhood Chain block. No transaction is offered.",
+          code: "chain_unavailable",
+        },
+        { status: 502 },
+      );
+    }
+
     await updateOwnedDecision(body.decisionId, wallet, {
       quotePrice: fresh.quotePrice,
       quotedUsdg: fresh.totalUsdg,
       quotedAt: fresh.quotedAt,
-      requestedAmount: body.quote.requestedCredit,
+      validatedBlock: Number(validatedBlock),
       executionStatus: "awaiting_signature",
     });
 

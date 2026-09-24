@@ -89,6 +89,12 @@ export function reasoningPayload(decision: OraDecision) {
     minimumDiscount: decision.params.minDiscountPercent,
     spendingLimitUsdg: decision.params.spendingLimitUsdg,
     deterministicDecision: decision.action,
+    ...(decision.executable
+      ? {
+          executableDiscountPercent: decision.executable.discountPercent,
+          executableTotalUsdg: decision.executable.totalUsdg,
+        }
+      : {}),
   };
 }
 
@@ -98,4 +104,18 @@ export function finalDecisionAction(
 ): DecisionAction {
   void _reasoning;
   return decision.action;
+}
+
+/** Reasoning is advisory. A failure or disagreement must not block or alter the decision. */
+export async function resolveAdvisoryReasoning(
+  decision: OraDecision,
+  reason: (decision: OraDecision) => Promise<OraReasoning | null>,
+): Promise<OraReasoning | null> {
+  try {
+    return await reason(decision);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    console.error("Orbio reasoning unavailable:", message);
+    return null;
+  }
 }

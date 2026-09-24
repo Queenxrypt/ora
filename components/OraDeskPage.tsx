@@ -21,7 +21,15 @@ import {
   robinhoodChain,
 } from "../lib/orbio/exchange";
 import { unitsToAtoms } from "../lib/orbio/market";
-import { decide } from "../lib/ora/decision";
+import { decide, decideWithExecutableQuote } from "../lib/ora/decision";
+import {
+  canReviewDecision,
+  evaluationKey,
+  nextEvaluationAction,
+  sameMarketEvaluation,
+  settingsReadyForEvaluation,
+  shouldRequestQuote,
+} from "../lib/ora/evaluation";
 import { quoteMeetsMinDiscount } from "../lib/ora/quote-rule";
 import {
   executionLabel,
@@ -84,14 +92,88 @@ export function OraDeskPage() {
     "idle",
   );
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [committed, setCommitted] = useState<UserSettings | null>(null);
   const saveResetRef = useRef<number | null>(null);
+  const lastPersistedKey = useRef<string | null>(null);
+  const inFlightKey = useRef<string | null>(null);
+  const inFlight = useRef<Promise<DecisionRecord | null> | null>(null);
+  const recordRef = useRef<DecisionRecord | null>(null);
+  const addressRef = useRef(address);
+  const marketRef = useRef(market);
+  const persistRef = useRef<
+    (expectedKey: string) => Promise<DecisionRecord | null>
+  >(async () => null);
+  addressRef.current = address;
+  marketRef.current = market;
 
   const liveDecision = useMemo(() => {
     if (!market || !settings) return null;
     return decide(market, settings);
   }, [market, settings]);
 
-  const decision = recorded ?? liveDecision;
+  const constrained = useMemo(() => {
+    if (!market || !settings || !liveDecision?.requestedAmount || !record?.executable) {
+      return null;
+    }
+    if (!sameMarketEvaluation(record.snapshot, market)) return null;
+    if (record.evaluatedSpendingLimitUsdg !== settings.spendingLimitUsdg) {
+      return null;
+    }
+    if (liveDecision.action !== "BUY") return null;
+    if (record.executable.requestedCredit !== liveDecision.requestedAmount) {
+      return null;
+    }
+    return decideWithExecutableQuote(market, settings, record.executable);
+  }, [market, settings, liveDecision, record]);
+
+  const evaluationMatches =
+    recorded != null &&
+    address != null &&
+    market != null &&
+    settings != null &&
+    evaluationKey(address, market, settings) === lastPersistedKey.current;
+  const formKey =
+    address && market && settings
+      ? evaluationKey(address, market, settings)
+      : null;
+  const committedKey =
+    address && market && committed
+      ? evaluationKey(address, market, committed)
+      : null;
+  const formDiffers =
+    formKey != null && committedKey != null && formKey !== committedKey;
+  const evaluationPlan =
+    address && market && committed
+      ? nextEvaluationAction({
+          wallet: address,
+          market,
+          params: committed,
+          lastKey: lastPersistedKey.current,
+          inFlightKey: inFlightKey.current,
+          latest: record ?? history[0] ?? null,
+        })
+      : null;
+  const latestForPlan = record ?? history[0] ?? null;
+  const requoteUncheckedBuy =
+    evaluationPlan?.type === "adopt" &&
+    latestForPlan?.decision === "BUY" &&
+    !latestForPlan.executable &&
+    canReviewDecision(latestForPlan);
+  const executablePending =
+    !formDiffers &&
+    liveDecision?.action === "BUY" &&
+    constrained == null &&
+    !evaluationMatches &&
+    (evaluationPlan?.type === "persist" || requoteUncheckedBuy);
+  const decision = executablePending
+    ? null
+    : (constrained ?? (evaluationMatches ? recorded : liveDecision));
+  const isBookPreview =
+    decision != null && !evaluationMatches && constrained == null;
+  const reasoningMatchesDecision =
+    decision != null &&
+    recorded != null &&
+    decision.action === recorded.action;
 
   const loadMarket = useCallback(async () => {
     setRefreshing(true);
@@ -105,9 +187,6 @@ export function OraDeskPage() {
         return;
       }
       setMarket(data.market);
-      setRecorded(null);
-      setReasoning(null);
-      setReasoningUnavailable(false);
       setUi((prev) =>
         prev === "market_loading" || prev === "market_unavailable"
           ? "ready"
@@ -124,14 +203,25 @@ export function OraDeskPage() {
   }, []);
 
   const loadRest = useCallback(async () => {
-    const query = walletSearchParam(address);
+    const wallet = address;
+    const query = walletSearchParam(wallet);
     const [settingsRes, ledgerRes] = await Promise.all([
       fetch(`/api/settings${query}`, { cache: "no-store" }),
       fetch(`/api/ledger${query}`, { cache: "no-store" }),
     ]);
+    if (addressRef.current !== wallet) return;
     const settingsJson = await settingsRes.json();
     const ledgerJson = await ledgerRes.json();
-    setSettings(settingsJson.settings);
+    if (!wallet) {
+      setSettings(settingsJson.settings ?? null);
+      setCommitted(null);
+      setHistory(ledgerJson.decisions ?? []);
+      return;
+    }
+    const loaded = settingsJson.settings as UserSettings | undefined;
+    if (!loaded || !settingsReadyForEvaluation(wallet, loaded)) return;
+    setSettings(loaded);
+    setCommitted(loaded);
     setHistory(ledgerJson.decisions ?? []);
   }, [address]);
 
@@ -164,11 +254,10 @@ export function OraDeskPage() {
       throw new Error(data.error ?? "Could not save settings.");
     }
     setSettings(data.settings);
-    setRecorded(null);
-    setReasoning(null);
-    setReasoningUnavailable(false);
+    setCommitted(data.settings);
     setQuote(null);
     setQuoteBook(null);
+    return data.settings as UserSettings;
   }
 
   async function handleSaveParameters(next: UserSettings) {
@@ -193,18 +282,35 @@ export function OraDeskPage() {
     }
   }
 
-  async function persistDecision(): Promise<DecisionRecord | null> {
+  function rememberRecord(next: DecisionRecord | null) {
+    recordRef.current = next;
+    setRecord(next);
+  }
+
+  function applyRecordedDecision(
+    next: OraDecision,
+    ledger: DecisionRecord,
+    reasoningResult: OraReasoning | null,
+    key: string,
+  ) {
+    lastPersistedKey.current = key;
+    setRecorded(next);
+    rememberRecord(ledger);
+    setReasoning(reasoningResult);
+    setReasoningUnavailable(!reasoningResult);
+  }
+
+  async function persistDecision(
+    expectedKey: string,
+  ): Promise<DecisionRecord | null> {
+    const wallet = addressRef.current;
     setError(null);
-    if (!address) {
-      setError("Connect a wallet before recording a decision.");
-      setUi("failed");
-      return null;
-    }
+    if (!wallet) return null;
     setUi("decision_loading");
     const response = await fetch("/api/decision", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ walletAddress: address }),
+      body: JSON.stringify({ walletAddress: wallet }),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -212,42 +318,149 @@ export function OraDeskPage() {
       setUi("failed");
       return null;
     }
-    setRecorded(data.decision);
-    setRecord(data.record);
+    if (addressRef.current !== wallet) return null;
+    const ledger = data.record as DecisionRecord;
     const nextReasoning =
-      (data.record as DecisionRecord | undefined)?.reasoning ??
-      (data.reasoning as OraReasoning | null) ??
-      null;
-    setReasoning(nextReasoning);
-    setReasoningUnavailable(!nextReasoning);
+      ledger.reasoning ?? (data.reasoning as OraReasoning | null) ?? null;
+    applyRecordedDecision(
+      data.decision as OraDecision,
+      ledger,
+      nextReasoning,
+      expectedKey,
+    );
     await loadRest();
-    setUi(data.decision.action === "BUY" ? "buy" : "wait");
-    return data.record as DecisionRecord;
+    setUi((prev) =>
+      prev === "review" || prev === "pending" || prev === "success"
+        ? prev
+        : data.decision.action === "BUY"
+          ? "buy"
+          : "wait",
+    );
+    return ledger;
   }
+
+  persistRef.current = persistDecision;
+
+  const ensureRecorded = useCallback(
+    async (
+      params: UserSettings,
+      force = false,
+    ): Promise<DecisionRecord | null> => {
+      const wallet = addressRef.current;
+      const book = marketRef.current;
+      if (!wallet || !book) return null;
+      if (!settingsReadyForEvaluation(wallet, params)) return null;
+      const key = evaluationKey(wallet, book, params);
+      if (inFlight.current && inFlightKey.current === key) {
+        return inFlight.current;
+      }
+      if (inFlight.current && inFlightKey.current !== key) {
+        await inFlight.current;
+        return ensureRecorded(params, force);
+      }
+      if (
+        !force &&
+        key === lastPersistedKey.current &&
+        recordRef.current &&
+        canReviewDecision(recordRef.current)
+      ) {
+        return recordRef.current;
+      }
+      const pending = persistRef.current(key);
+      inFlightKey.current = key;
+      inFlight.current = pending;
+      try {
+        return await pending;
+      } finally {
+        if (inFlight.current === pending) {
+          inFlight.current = null;
+          inFlightKey.current = null;
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    lastPersistedKey.current = null;
+    inFlightKey.current = null;
+    recordRef.current = null;
+    setRecord(null);
+    setRecorded(null);
+    setReasoning(null);
+    setReasoningUnavailable(false);
+    setCommitted(null);
+    setSettings(null);
+    setHistory([]);
+  }, [address]);
+
+  useEffect(() => {
+    if (!settingsReadyForEvaluation(address, committed) || !market || !committed) {
+      return;
+    }
+    const plan = nextEvaluationAction({
+      wallet: address,
+      market,
+      params: committed,
+      lastKey: lastPersistedKey.current,
+      inFlightKey: inFlightKey.current,
+      latest: recordRef.current ?? history[0] ?? null,
+    });
+    if (plan.type === "skip") return;
+    if (plan.type === "adopt") {
+      const latest = history[0];
+      if (!latest || !canReviewDecision(latest)) return;
+      if (latest.decision === "BUY" && !latest.executable) {
+        void ensureRecorded(committed, true);
+        return;
+      }
+      applyRecordedDecision(
+        {
+          action: latest.decision,
+          timestamp: latest.timestamp,
+          market: latest.snapshot,
+          reason: latest.reason,
+          requestedAmount: latest.requestedAmount,
+          params: committed,
+        },
+        latest,
+        latest.reasoning ?? null,
+        plan.key,
+      );
+      setUi(latest.decision === "BUY" ? "buy" : "wait");
+      return;
+    }
+    void ensureRecorded(committed, true);
+  }, [address, market, committed, history, ensureRecorded]);
 
   async function requestQuote() {
     const current = decision;
-    if (!current || current.action !== "BUY") {
+    if (!shouldRequestQuote(current?.action)) {
       setError("Ora is not offering a purchase on the current book.");
       setProgress("");
+      return;
+    }
+    if (!address) {
+      setError("Connect a wallet before recording a decision.");
+      setProgress("");
+      setUi("failed");
       return;
     }
     setError(null);
     setProgress("Getting executable quote");
     setTimeout(() => scrollToReview(), 0);
     try {
-      if (settings) {
-        await saveSettings(settings);
-        setProgress("Getting executable quote");
+      const active = settings ? await saveSettings(settings) : null;
+      setProgress("Getting executable quote");
+      const persisted = active ? await ensureRecorded(active) : null;
+      if (!persisted) {
+        setProgress("");
+        return;
       }
-      const persisted =
-        record?.decision === "BUY"
-          ? record
-          : await persistDecision();
-      if (!persisted || persisted.decision !== "BUY") {
+      if (!shouldRequestQuote(persisted.decision)) {
         setProgress("");
         setError(
-          persisted?.reason ??
+          persisted.reason ??
             "Ora is not offering a purchase on the current book.",
         );
         setUi("failed");
@@ -255,7 +468,7 @@ export function OraDeskPage() {
       }
       setRecord(persisted);
       const amount =
-        current.requestedAmount ??
+        current?.requestedAmount ??
         settings?.requestedCredit ??
         market?.minBuyCredit ??
         5;
@@ -605,7 +818,30 @@ export function OraDeskPage() {
   const recent = history.slice(0, 8);
   const minDiscount =
     settings?.minDiscountPercent ?? decision?.params.minDiscountPercent;
-  const showDecide = !decision;
+  const checkMinimumDiscount =
+    decision?.params.minDiscountPercent ?? settings?.minDiscountPercent ?? null;
+  const checkExecutableDiscount =
+    quote?.discountPercent ??
+    decision?.executable?.discountPercent ??
+    record?.executable?.discountPercent ??
+    null;
+  const checkCreditRequested =
+    decision?.requestedAmount ??
+    decision?.params.requestedCredit ??
+    quote?.requestedCredit ??
+    settings?.requestedCredit ??
+    null;
+  const checkExecutableQuote =
+    quote?.totalUsdg ??
+    decision?.executable?.totalUsdg ??
+    record?.executable?.totalUsdg ??
+    null;
+  const checkSpendingLimit =
+    decision?.params.spendingLimitUsdg ??
+    record?.evaluatedSpendingLimitUsdg ??
+    settings?.spendingLimitUsdg ??
+    null;
+  const showDecide = !decision && !executablePending;
   const decisionWhy = decision?.reason ?? null;
   const meetsThreshold =
     minDiscount != null && market != null && market.bestDiscount >= minDiscount;
@@ -626,13 +862,23 @@ export function OraDeskPage() {
           <div className="command-grid">
             <div className="command-lead">
               <div className="command-decision" id="decision">
-                <p className="command-kicker">Ora Decision</p>
-                {!decision && ui === "decision_loading" && (
-                  <p className="status">Evaluating…</p>
+                <p className="command-kicker">
+                  {isBookPreview ? "Book preview" : "Ora Decision"}
+                </p>
+                {!decision &&
+                  (ui === "decision_loading" || executablePending) &&
+                  ui !== "failed" && (
+                    <p className="status">Evaluating…</p>
+                  )}
+                {!decision && ui === "failed" && error && (
+                  <p className="error">{error}</p>
                 )}
-                {!decision && ui !== "decision_loading" && (
-                  <p className="status">Waiting for market data.</p>
-                )}
+                {!decision &&
+                  !executablePending &&
+                  ui !== "decision_loading" &&
+                  ui !== "failed" && (
+                    <p className="status">Waiting for market data.</p>
+                  )}
                 {decision && (
                   <>
                     <p
@@ -644,30 +890,42 @@ export function OraDeskPage() {
                     {decisionWhy && (
                       <p className="decision-why">{decisionWhy}</p>
                     )}
-                    {(recorded || ui === "decision_loading") && (
+                    {((reasoningMatchesDecision && !isBookPreview) ||
+                      (ui === "decision_loading" && !evaluationMatches)) && (
                       <div className="orbio-reasoning">
-                        <p className="command-kicker">Orbio reasoning</p>
-                        {ui === "decision_loading" && !recorded && (
+                        <p className="command-kicker orbio-reasoning-heading">
+                          <span>Orbio reasoning</span>
+                          {evaluationMatches && reasoning && (
+                            <>
+                              <span
+                                className="orbio-reasoning-chevron"
+                                aria-hidden="true"
+                              >
+                                ›
+                              </span>
+                              <span
+                                className={`orbio-reasoning-action ${reasoning.recommendation === "BUY" ? "buy" : "wait"}`}
+                              >
+                                {reasoning.recommendation}
+                              </span>
+                            </>
+                          )}
+                        </p>
+                        {ui === "decision_loading" && !evaluationMatches && (
                           <p className="status">Requesting interpretation…</p>
                         )}
-                        {recorded && reasoningUnavailable && (
+                        {evaluationMatches && reasoningUnavailable && (
                           <>
-                            <p className="orbio-reasoning-mark unavailable">
-                              Unavailable
+                            <p className="orbio-reasoning-unavailable">
+                              Not available
                             </p>
                             <p className="orbio-reasoning-copy">
-                              Ora&apos;s deterministic procurement decision is
-                              still valid.
+                              Ora&apos;s deterministic decision remains valid.
                             </p>
                           </>
                         )}
-                        {recorded && reasoning && (
+                        {evaluationMatches && reasoning && (
                           <>
-                            <p
-                              className={`orbio-reasoning-mark ${reasoning.recommendation === "BUY" ? "buy" : "wait"}`}
-                            >
-                              {reasoning.recommendation}
-                            </p>
                             {!reasoning.agreesWithRule && (
                               <p className="orbio-reasoning-disagree">
                                 Disagrees with Ora&apos;s {decision.action}{" "}
@@ -683,11 +941,16 @@ export function OraDeskPage() {
                               {reasoning.rationale}
                             </p>
                             {reasoning.risks.length > 0 && (
-                              <ul className="orbio-reasoning-risks">
-                                {reasoning.risks.map((risk) => (
-                                  <li key={risk}>{risk}</li>
-                                ))}
-                              </ul>
+                              <aside className="orbio-considerations">
+                                <p className="orbio-considerations-label">
+                                  Considerations
+                                </p>
+                                <ul>
+                                  {reasoning.risks.map((risk) => (
+                                    <li key={risk}>{risk}</li>
+                                  ))}
+                                </ul>
+                              </aside>
                             )}
                           </>
                         )}
@@ -718,11 +981,40 @@ export function OraDeskPage() {
                   <p
                     className={`command-readiness ${decision.action === "BUY" ? "buy" : "wait"}`}
                   >
-                    {decision.action === "BUY"
-                      ? "Ora is ready to buy."
-                      : "Ora is waiting."}
+                    {isBookPreview
+                      ? address
+                        ? "Order-book preview. Not a recorded decision."
+                        : "Order-book preview. Connect a wallet for Ora's quote-checked decision."
+                      : decision.action === "BUY"
+                        ? "Ora is ready to buy."
+                        : "Ora is waiting."}
                   </p>
                 )}
+                <div className="procurement-check">
+                  <p className="command-kicker">Procurement check</p>
+                  <div className="procurement-rows">
+                    <ProcurementRow
+                      label="Minimum discount"
+                      value={formatCheckPercent(checkMinimumDiscount)}
+                    />
+                    <ProcurementRow
+                      label="Executable discount"
+                      value={formatCheckPercent(checkExecutableDiscount)}
+                    />
+                    <ProcurementRow
+                      label="CREDIT requested"
+                      value={formatCheckCredit(checkCreditRequested)}
+                    />
+                    <ProcurementRow
+                      label="Executable quote"
+                      value={formatCheckUsdg(checkExecutableQuote)}
+                    />
+                    <ProcurementRow
+                      label="Spending limit"
+                      value={formatCheckUsdg(checkSpendingLimit)}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -746,7 +1038,9 @@ export function OraDeskPage() {
                     className="btn btn-action command-cta"
                     type="button"
                     disabled={ui === "decision_loading"}
-                    onClick={() => void persistDecision()}
+                    onClick={() => {
+                      if (settings) void ensureRecorded(settings);
+                    }}
                   >
                     {ui === "decision_loading" ? "Deciding…" : "Decide"}
                   </button>
@@ -1297,5 +1591,33 @@ export function OraDeskPage() {
         )}
       </section>
     </main>
+  );
+}
+
+function formatCheckPercent(value: number | null): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  return `${value}%`;
+}
+
+function formatCheckCredit(value: number | null): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  return formatCredit(value);
+}
+
+function formatCheckUsdg(value: number | null): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  return `${value.toLocaleString("en-US", {
+    maximumFractionDigits: 6,
+    minimumFractionDigits: 0,
+  })} USDG`;
+}
+
+function ProcurementRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="procurement-row">
+      <span className="procurement-label">{label}</span>
+      <span className="procurement-leader" aria-hidden="true" />
+      <span className="procurement-value mono">{value}</span>
+    </div>
   );
 }

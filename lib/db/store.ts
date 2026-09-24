@@ -15,7 +15,7 @@ import {
 } from "./rows";
 import { supabaseAdmin } from "./supabase";
 
-export type DecisionAccessError = "missing" | "forbidden";
+export type DecisionAccessError = "missing" | "forbidden" | "confirmed";
 
 function throwIfError(error: { message: string } | null) {
   if (error) throw new Error(error.message);
@@ -112,21 +112,42 @@ export async function updateOwnedDecision(
 ): Promise<{ record: DecisionRecord } | { error: DecisionAccessError }> {
   const access = await requireOwnedDecision(id, walletAddress);
   if ("error" in access) return access;
+  if (access.record.executionStatus === "success") return { error: "confirmed" };
   const wallet = normalizeWalletAddress(walletAddress);
   if (!wallet) return { error: "forbidden" };
   const { walletAddress: _ignored, ...rest } = patch;
   void _ignored;
   const rowPatch = patchToRow(rest);
+  // A receipt-verified confirmation is final; the filter keeps a concurrent write off it.
   const { data, error } = await supabaseAdmin()
     .from("decisions")
     .update(rowPatch)
     .eq("id", id)
     .eq("wallet_address", wallet)
+    .or("execution_status.is.null,execution_status.neq.success")
     .select("*")
     .maybeSingle();
   throwIfError(error);
-  if (!data) return { error: "missing" };
+  if (!data) {
+    const latest = await requireOwnedDecision(id, walletAddress);
+    if ("record" in latest && latest.record.executionStatus === "success") {
+      return { error: "confirmed" };
+    }
+    return { error: "missing" };
+  }
   return { record: rowToRecord(data as DecisionRow) };
+}
+
+export async function findConfirmedDecisionIdsByTxHash(
+  txHash: `0x${string}`,
+): Promise<string[]> {
+  const { data, error } = await supabaseAdmin()
+    .from("decisions")
+    .select("id")
+    .ilike("tx_hash", txHash)
+    .eq("execution_status", "success");
+  throwIfError(error);
+  return ((data ?? []) as { id: string }[]).map((row) => row.id);
 }
 
 export async function readSettings(

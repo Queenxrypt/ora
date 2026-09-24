@@ -19,5 +19,5 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", "src", "lib/ora/decision.check.ts", "lib/ora/reasoning.check.ts", "lib/ora/outcomes.check.ts", "lib/db/rows.check.ts"]
+  "exclude": ["node_modules", "src", "lib/ora/decision.check.ts", "lib/ora/reasoning.check.ts", "lib/ora/outcomes.check.ts", "lib/ora/evaluation.check.ts", "lib/ora/quote-amount.check.ts", "lib/db/rows.check.ts", "lib/db/ledger-mutation.check.ts"]
 }

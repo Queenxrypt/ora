@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { decide } from "../../../lib/ora/decision";
+import { quoteForCredit } from "../../../lib/orbio/exchange";
+import { decide, decideWithExecutableQuote } from "../../../lib/ora/decision";
+import {
+  finalDecisionAction,
+  resolveAdvisoryReasoning,
+} from "../../../lib/ora/reasoning";
 import { recordFromDecision } from "../../../lib/ora/record";
 import { appendDecision, readSettings } from "../../../lib/db/store";
 import { readMarketSnapshot } from "../../../lib/orbio/market";
@@ -25,16 +30,39 @@ export async function POST(request: Request) {
       readMarketSnapshot(),
       readSettings(wallet),
     ]);
-    const decision = decide(market, settings);
-    let reasoning = null;
-    try {
-      reasoning = await reasonAboutDecision(decision);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "unknown error";
-      console.error("Orbio reasoning unavailable:", message);
-      reasoning = null;
+    const book = decide(market, settings);
+    let evaluated = book;
+    if (book.action === "BUY" && book.requestedAmount != null) {
+      let quoted;
+      try {
+        quoted = await quoteForCredit(book.requestedAmount);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "quote failed";
+        console.error("Executable quote unavailable:", message);
+        return NextResponse.json(
+          {
+            error:
+              "Executable quote unavailable. Ora will not offer a purchase until the quote can be checked.",
+          },
+          { status: 502 },
+        );
+      }
+      evaluated = decideWithExecutableQuote(market, settings, {
+        totalUsdg: quoted.totalUsdg,
+        discountPercent: quoted.discountPercent,
+        creditOut: quoted.creditOut,
+        requestedCredit: quoted.requestedCredit,
+      });
     }
+    const reasoning = await resolveAdvisoryReasoning(
+      evaluated,
+      reasonAboutDecision,
+    );
+    const decision = {
+      ...evaluated,
+      action: finalDecisionAction(evaluated, reasoning),
+    };
     const record = await appendDecision(
       recordFromDecision(decision, {
         executionStatus: "none",

@@ -13,6 +13,7 @@ create table if not exists public.decisions (
   quote_price double precision,
   quoted_usdg double precision,
   quoted_at timestamptz,
+  validated_block bigint,
   execution_price double precision,
   tx_hash text,
   execution_status text,
@@ -26,6 +27,11 @@ create table if not exists public.decisions (
 
 create index if not exists decisions_wallet_timestamp_idx
   on public.decisions (wallet_address, timestamp desc);
+
+-- One onchain purchase confirms at most one decision.
+create unique index if not exists decisions_confirmed_tx_hash_key
+  on public.decisions (lower(tx_hash))
+  where execution_status = 'success' and tx_hash is not null;
 
 create table if not exists public.settings (
   wallet_address text primary key,

@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { quoteForCredit } from "../../../lib/orbio/exchange";
 import { decide } from "../../../lib/ora/decision";
+import { canReviewDecision } from "../../../lib/ora/evaluation";
+import {
+  checkAmountAgainstMarket,
+  recordedQuoteAmount,
+  type AmountRejection,
+} from "../../../lib/ora/quote-amount";
 import { quoteMeetsMinDiscount } from "../../../lib/ora/quote-rule";
 import {
   readSettings,
@@ -17,53 +23,67 @@ import {
 export const dynamic = "force-dynamic";
 export const maxDuration = 20;
 
+function amountResponse(rejection: AmountRejection) {
+  return NextResponse.json(
+    { error: rejection.error, code: rejection.code },
+    { status: rejection.status },
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
-      requestedCredit?: number;
       decisionId?: string;
       walletAddress?: unknown;
       wallet?: unknown;
     };
     const wallet = walletFromBody(body);
     if (!wallet) return missingWalletResponse();
-
-    if (body.decisionId) {
-      const access = await requireOwnedDecision(body.decisionId, wallet);
-      if ("error" in access) return decisionAccessResponse(access.error);
+    if (!body.decisionId) {
+      return NextResponse.json({ error: "Missing decision." }, { status: 400 });
     }
+
+    const access = await requireOwnedDecision(body.decisionId, wallet);
+    if ("error" in access) return decisionAccessResponse(access.error);
+    if (!canReviewDecision(access.record)) {
+      return NextResponse.json(
+        {
+          error: "This decision is already finished and cannot be quoted again.",
+          code: "terminal",
+        },
+        { status: 409 },
+      );
+    }
+    const recorded = recordedQuoteAmount(access.record);
+    if (!recorded.ok) return amountResponse(recorded);
 
     const settings = await readSettings(wallet);
     const market = await readMarketSnapshot();
-    const requestedCredit = Math.max(
-      market.minBuyCredit,
-      body.requestedCredit ?? settings.requestedCredit,
-    );
 
     const liveDecision = decide(market, settings);
     if (liveDecision.action !== "BUY") {
-      let wasBuy = false;
-      if (body.decisionId) {
-        const access = await requireOwnedDecision(body.decisionId, wallet);
-        wasBuy = !("error" in access) && access.record.decision === "BUY";
-        if (wasBuy) {
-          await updateOwnedDecision(body.decisionId, wallet, {
-            executionStatus: "stale_quote",
-            blockedReason: "Market no longer meets Ora BUY conditions.",
-          });
-        }
-      }
+      await updateOwnedDecision(body.decisionId, wallet, {
+        executionStatus: "stale_quote",
+        blockedReason: "Market no longer meets Ora BUY conditions.",
+      });
       return NextResponse.json(
         {
-          error: wasBuy
-            ? "The CREDIT market changed. Ora no longer recommends BUY. Review the desk before trying again."
-            : "Ora does not recommend BUY at the current book. No executable purchase is offered.",
+          error:
+            "The CREDIT market changed. Ora no longer recommends BUY. Review the desk before trying again.",
           code: "market_changed",
           decision: liveDecision,
         },
         { status: 409 },
       );
     }
+
+    const checked = checkAmountAgainstMarket(
+      recorded.requestedCredit,
+      market,
+      liveDecision.requestedAmount,
+    );
+    if (!checked.ok) return amountResponse(checked);
+    const requestedCredit = checked.requestedCredit;
 
     const quote = await quoteForCredit(requestedCredit);
 
@@ -94,16 +114,13 @@ export async function POST(request: Request) {
     };
 
     if (!quoteMeetsMinDiscount(quote.discountPercent, settings.minDiscountPercent)) {
-      if (body.decisionId) {
-        await updateOwnedDecision(body.decisionId, wallet, {
-          executionStatus: "review",
-          quotePrice: quote.quotePrice,
-          quotedUsdg: quote.totalUsdg,
-          quotedAt: quote.quotedAt,
-          requestedAmount: requestedCredit,
-          blockedReason: `Executable quote is ${quote.discountPercent}%, below the ${settings.minDiscountPercent}% minimum. Book discount is not the fill price.`,
-        });
-      }
+      await updateOwnedDecision(body.decisionId, wallet, {
+        executionStatus: "review",
+        quotePrice: quote.quotePrice,
+        quotedUsdg: quote.totalUsdg,
+        quotedAt: quote.quotedAt,
+        blockedReason: `Executable quote is ${quote.discountPercent}%, below the ${settings.minDiscountPercent}% minimum. Book discount is not the fill price.`,
+      });
       return NextResponse.json(
         {
           error: `The executable quote is ${quote.discountPercent}% per CREDIT, below your ${settings.minDiscountPercent}% minimum. The CREDIT book (${market.bestDiscount}%) is not the fill price. Purchase is not offered.`,
@@ -117,16 +134,13 @@ export async function POST(request: Request) {
       );
     }
 
-    if (body.decisionId) {
-      await updateOwnedDecision(body.decisionId, wallet, {
-        executionStatus: "review",
-        quotePrice: quote.quotePrice,
-        quotedUsdg: quote.totalUsdg,
-        quotedAt: quote.quotedAt,
-        requestedAmount: requestedCredit,
-        blockedReason: undefined,
-      });
-    }
+    await updateOwnedDecision(body.decisionId, wallet, {
+      executionStatus: "review",
+      quotePrice: quote.quotePrice,
+      quotedUsdg: quote.totalUsdg,
+      quotedAt: quote.quotedAt,
+      blockedReason: undefined,
+    });
 
     return NextResponse.json({
       quote,

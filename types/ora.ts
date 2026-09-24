@@ -23,6 +23,14 @@ export type ProcurementParams = {
 
 export type DecisionAction = "BUY" | "WAIT";
 
+/** Fee-inclusive terms from an exchange quote. Not an order-book level. */
+export type ExecutableTerms = {
+  totalUsdg: number;
+  discountPercent: number;
+  creditOut: number;
+  requestedCredit: number;
+};
+
 export type OraReasoning = {
   recommendation: DecisionAction;
   rationale: string;
@@ -37,6 +45,8 @@ export type OraDecision = {
   reason: string;
   requestedAmount?: number;
   params: ProcurementParams;
+  /** Present when this decision was checked against an exchange quote. */
+  executable?: ExecutableTerms;
 };
 
 export type ExecutionStatus =
@@ -84,6 +94,8 @@ export type DecisionRecord = {
   quotePrice?: number;
   quotedUsdg?: number;
   quotedAt?: string;
+  /** Chain head read when the quote was validated; the purchase must be mined after it. */
+  validatedBlock?: number;
   executionPrice?: number;
   txHash?: string;
   executionStatus?: ExecutionStatus;
@@ -94,6 +106,10 @@ export type DecisionRecord = {
   /** Owner wallet. Absent on legacy/unowned records; do not invent. */
   walletAddress?: string;
   reasoning?: OraReasoning;
+  /** Quote terms used to confirm or reject BUY. Absent on older rows. */
+  executable?: ExecutableTerms;
+  /** Spending limit this decision was evaluated against. Absent on older rows. */
+  evaluatedSpendingLimitUsdg?: number;
 };
 
 export type OutcomePhase = "decision" | "execution" | "confirmed" | "outcome";

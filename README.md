@@ -18,9 +18,9 @@ Orbio makes inference tradable through CREDIT. Ora treats acquiring that CREDIT 
    - Minimum acceptable discount
 3. Ora reads the live CREDIT market.
 4. Ora evaluates the market with its deterministic decision rules.
-5. If conditions are met, Ora returns BUY.
-6. If conditions are not met, Ora returns WAIT.
-7. For a BUY decision, Ora retrieves a fresh executable quote before anything is signed.
+5. When the book can fill the request, Ora checks one executable quote for that amount. BUY is returned only if that quote meets the spending limit and minimum discount.
+6. If the book or the executable quote does not qualify, Ora returns WAIT.
+7. For a BUY decision, Ora retrieves a fresh executable quote again before anything is signed.
 8. The user reviews the quote and approves the transaction in their wallet.
 9. The purchase is executed through Orbio's CREDIT exchange contract.
 10. The transaction is verified after confirmation.
@@ -39,9 +39,13 @@ The requested amount is floored to the live market's minimum buy size:
 requested = max(requestedCredit, market.minBuyCredit)
 ```
 
-Ora then checks order-book levels against the configured minimum discount. A level qualifies when its discount is at least that minimum and it has enough available CREDIT for `requested`.
+Ora first checks order-book levels against the configured minimum discount. A level qualifies when its discount is at least that minimum and it has enough available CREDIT for `requested`. If no qualifying level can fill the request, Ora returns WAIT. That book check does not call the exchange.
 
-BUY is returned when a qualifying level can fill the request. Otherwise Ora returns WAIT.
+A qualifying book is not an executable quote. Before Ora presents BUY, it reads one executable quote for that same requested amount. The quote total includes the exchange fee. BUY is returned only when the quote discount meets the minimum discount and the quote total is within the spending limit. If the quote misses either check, Ora returns WAIT.
+
+That quote is read once per new evaluation, and only after the book already qualifies. It is not read on every render. If the quote cannot be obtained, Ora does not present BUY and does not record a decision.
+
+The purchase still re-reads the market and validates a new quote immediately before signing. The market can move between the decision and that check.
 
 The deterministic rule is authoritative.
 

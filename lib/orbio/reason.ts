@@ -48,8 +48,7 @@ export async function reasonAboutDecision(
         chatRequest: {
           model: process.env.ORBIO_REASONING_MODEL?.trim() || DEFAULT_MODEL,
           stream: false,
-          maxTokens: 400,
-          temperature: 0.2,
+          maxTokens: 2000,
           responseFormat: {
             type: "json_schema",
             jsonSchema: {

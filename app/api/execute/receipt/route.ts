@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
-import { CONTRACTS } from "../../../../lib/orbio/contracts";
 import { publicClient } from "../../../../lib/orbio/exchange";
 import {
+  checkCallMatchesDecision,
+  checkMinedAfterValidation,
+  deriveExecution,
+  verifyBuyAndActivateCall,
+} from "../../../../lib/orbio/receipt";
+import {
+  findConfirmedDecisionIdsByTxHash,
   requireOwnedDecision,
   updateOwnedDecision,
 } from "../../../../lib/db/store";
-import { normalizeWalletAddress } from "../../../../lib/ora/wallet";
 import {
   decisionAccessResponse,
   missingWalletResponse,
@@ -21,12 +26,11 @@ function isHash(value: unknown): value is `0x${string}` {
 
 export async function POST(request: Request) {
   try {
+    // Financial fields in the body (creditAcquired, totalUsdgPaid, quotePrice,
+    // executionPrice) are never read: confirmed values come from the receipt.
     const body = (await request.json()) as {
       decisionId?: string;
       txHash?: unknown;
-      creditAcquired?: number;
-      totalUsdgPaid?: number;
-      quotePrice?: number;
       walletAddress?: unknown;
       wallet?: unknown;
     };
@@ -35,11 +39,12 @@ export async function POST(request: Request) {
     if (!body.decisionId || !isHash(body.txHash)) {
       return NextResponse.json({ error: "Missing transaction." }, { status: 400 });
     }
-    const txHash = body.txHash;
+    const txHash = body.txHash.toLowerCase() as `0x${string}`;
 
     const access = await requireOwnedDecision(body.decisionId, wallet);
     if ("error" in access) return decisionAccessResponse(access.error);
     const current = access.record;
+    const stored = current.txHash?.toLowerCase();
 
     if (current.executionStatus === "success") {
       return NextResponse.json({
@@ -49,9 +54,50 @@ export async function POST(request: Request) {
       });
     }
 
-    if (current.txHash && current.txHash.toLowerCase() !== txHash.toLowerCase()) {
+    if (stored && stored !== txHash) {
       return NextResponse.json(
         { error: "Transaction hash does not match this decision." },
+        { status: 409 },
+      );
+    }
+
+    // Only a signable decision, or the purchase confirm already recorded, can settle.
+    const receivable = stored
+      ? current.executionStatus === "pending"
+      : current.executionStatus === "awaiting_signature";
+    if (!receivable) {
+      return NextResponse.json(
+        {
+          error: "This decision is not awaiting a purchase receipt.",
+          code: "not_receivable",
+        },
+        { status: 409 },
+      );
+    }
+    if (current.validatedBlock == null) {
+      return NextResponse.json(
+        {
+          error: "This decision has no validated block to confirm against.",
+          code: "unvalidated",
+        },
+        { status: 409 },
+      );
+    }
+
+    if (current.decision !== "BUY") {
+      return NextResponse.json(
+        { error: "Only a BUY decision can be confirmed." },
+        { status: 409 },
+      );
+    }
+
+    const claimed = await findConfirmedDecisionIdsByTxHash(txHash);
+    if (claimed.some((id) => id !== current.id)) {
+      return NextResponse.json(
+        {
+          error: "This transaction already confirmed another decision.",
+          code: "tx_reused",
+        },
         { status: 409 },
       );
     }
@@ -65,24 +111,34 @@ export async function POST(request: Request) {
       );
     }
 
-    const from = normalizeWalletAddress(tx.from);
-    if (from !== wallet) {
+    const verified = verifyBuyAndActivateCall(tx, wallet);
+    if (!verified.ok) {
+      if (verified.code === "sender") {
+        return NextResponse.json({ error: verified.error }, { status: 403 });
+      }
+      const failed = await updateOwnedDecision(body.decisionId, wallet, {
+        txHash,
+        executionStatus: "failed",
+        blockedReason: verified.error,
+      });
+      if ("error" in failed) return decisionAccessResponse(failed.error);
       return NextResponse.json(
-        { error: "Transaction sender does not match this wallet." },
-        { status: 403 },
+        {
+          error: "Transaction is not a buyAndActivate purchase on the Orbio exchange.",
+          code: verified.code,
+          record: failed.record,
+        },
+        { status: 409 },
       );
     }
 
-    const to = normalizeWalletAddress(tx.to);
-    const exchange = normalizeWalletAddress(CONTRACTS.exchange);
-    if (!to || !exchange || to !== exchange) {
-      await updateOwnedDecision(body.decisionId, wallet, {
-        txHash,
-        executionStatus: "failed",
-        blockedReason: "Transaction is not a buyAndActivate call to the exchange.",
-      });
+    const matched = checkCallMatchesDecision(verified.call, {
+      wallet,
+      quotedUsdg: current.quotedUsdg,
+    });
+    if (!matched.ok) {
       return NextResponse.json(
-        { error: "Transaction is not a purchase on the Orbio exchange." },
+        { error: matched.error, code: matched.code },
         { status: 409 },
       );
     }
@@ -97,6 +153,14 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { status: "pending", txHash, record: pending.record },
         { status: 202 },
+      );
+    }
+
+    const mined = checkMinedAfterValidation(receipt.blockNumber, current.validatedBlock);
+    if (!mined.ok) {
+      return NextResponse.json(
+        { error: mined.error, code: mined.code },
+        { status: 409 },
       );
     }
 
@@ -117,15 +181,44 @@ export async function POST(request: Request) {
       );
     }
 
+    const derived = deriveExecution(receipt, { wallet, call: verified.call });
+    if (!derived.ok) {
+      if (derived.code === "empty") {
+        const failed = await updateOwnedDecision(body.decisionId, wallet, {
+          txHash,
+          executionStatus: "failed",
+          blockedReason: derived.error,
+        });
+        if ("error" in failed) return decisionAccessResponse(failed.error);
+      }
+      return NextResponse.json(
+        { error: derived.error, code: derived.code },
+        { status: 409 },
+      );
+    }
+    const execution = derived.execution;
+
     const record = await updateOwnedDecision(body.decisionId, wallet, {
       txHash,
       executionStatus: "success",
-      creditAcquired: body.creditAcquired ?? current.creditAcquired ?? current.requestedAmount,
-      totalUsdgPaid: body.totalUsdgPaid ?? current.totalUsdgPaid ?? current.quotedUsdg,
-      executionPrice: body.quotePrice ?? current.executionPrice ?? current.quotePrice,
+      creditAcquired: execution.creditAcquired,
+      totalUsdgPaid: execution.totalUsdgPaid,
+      executionPrice: execution.executionPrice,
       confirmedAt: new Date().toISOString(),
     });
-    if ("error" in record) return decisionAccessResponse(record.error);
+    if ("error" in record) {
+      if (record.error === "confirmed") {
+        const latest = await requireOwnedDecision(body.decisionId, wallet);
+        if ("record" in latest && latest.record.txHash?.toLowerCase() === txHash) {
+          return NextResponse.json({
+            txHash,
+            status: "success",
+            record: latest.record,
+          });
+        }
+      }
+      return decisionAccessResponse(record.error);
+    }
 
     return NextResponse.json({
       txHash,

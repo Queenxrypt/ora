@@ -1,9 +1,11 @@
 import type {
   DepthLevel,
+  ExecutableTerms,
   MarketSnapshot,
   OraDecision,
   ProcurementParams,
 } from "../../types/ora";
+import { quoteMeetsMinDiscount } from "./quote-rule";
 
 export const DEFAULT_PARAMS: ProcurementParams = {
   minDiscountPercent: 20,
@@ -43,6 +45,81 @@ export function decide(
     requestedAmount: requested,
     params,
     reason: `${chosen.discountPercent}% discount meets your ${params.minDiscountPercent}% threshold and enough CREDIT is available to fulfill your ${formatCredit(requested)} CREDIT request.`,
+  };
+}
+
+/**
+ * Book screening stays in `decide`. A BUY is executable only after the exchange
+ * quote for that same requested amount clears the spending limit and minimum
+ * discount. `terms === null` means the quote could not be obtained.
+ */
+export function decideWithExecutableQuote(
+  market: MarketSnapshot,
+  params: ProcurementParams,
+  terms: ExecutableTerms | null,
+): OraDecision {
+  const book = decide(market, params);
+  if (book.action !== "BUY") return book;
+
+  if (!terms) {
+    return quoteWait(
+      book,
+      "Executable quote is unavailable, so Ora will not offer a purchase.",
+    );
+  }
+
+  const requested = book.requestedAmount;
+  if (terms.requestedCredit !== requested) {
+    return quoteWait(
+      book,
+      `Executable quote is for ${formatCredit(terms.requestedCredit)} CREDIT, not the ${formatCredit(requested ?? 0)} CREDIT request.`,
+      terms,
+    );
+  }
+
+  if (terms.creditOut <= 0) {
+    return quoteWait(
+      book,
+      "Executable quote cannot fill this CREDIT request.",
+      terms,
+    );
+  }
+
+  if (terms.totalUsdg > params.spendingLimitUsdg) {
+    return quoteWait(
+      book,
+      `Executable cost is ${terms.totalUsdg} USDG, above your ${params.spendingLimitUsdg} USDG spending limit.`,
+      terms,
+    );
+  }
+
+  if (!quoteMeetsMinDiscount(terms.discountPercent, params.minDiscountPercent)) {
+    return quoteWait(
+      book,
+      `Executable discount is ${terms.discountPercent}%, below your ${params.minDiscountPercent}% minimum. The book discount is not the fill price.`,
+      terms,
+    );
+  }
+
+  return {
+    ...book,
+    executable: terms,
+    reason: `${book.reason} Executable quote is ${terms.discountPercent}% at ${terms.totalUsdg} USDG.`,
+  };
+}
+
+function quoteWait(
+  book: OraDecision,
+  reason: string,
+  terms?: ExecutableTerms,
+): OraDecision {
+  return {
+    action: "WAIT",
+    timestamp: book.timestamp,
+    market: book.market,
+    params: book.params,
+    reason,
+    ...(terms ? { executable: terms } : {}),
   };
 }
 

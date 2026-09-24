@@ -12,7 +12,14 @@
     "test:decision": "tsx lib/ora/decision.check.ts",
     "test:outcomes": "tsx lib/ora/outcomes.check.ts",
     "test:reasoning": "tsx lib/ora/reasoning.check.ts",
-    "test:store": "tsx lib/db/rows.check.ts"
+    "test:store": "tsx lib/db/rows.check.ts",
+    "test:ledger": "tsx lib/db/ledger-mutation.check.ts",
+    "test:evaluation": "tsx lib/ora/evaluation.check.ts",
+    "test:quote-amount": "tsx lib/ora/quote-amount.check.ts",
+    "test:receipt": "tsx lib/orbio/receipt.check.ts",
+    "test:validate": "tsx lib/ora/validate-lifecycle.check.ts",
+    "test:confirm": "tsx lib/orbio/confirm.check.ts",
+    "test:integrity": "tsx lib/orbio/execution-integrity.check.ts"
   },
   "dependencies": {
     "@openrouter/sdk": "^1.3.1",

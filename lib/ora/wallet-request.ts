@@ -22,9 +22,20 @@ export function missingWalletResponse() {
   );
 }
 
-export function decisionAccessResponse(error: "missing" | "forbidden") {
+export function decisionAccessResponse(
+  error: "missing" | "forbidden" | "confirmed",
+) {
   if (error === "missing") {
     return NextResponse.json({ error: "Unknown decision." }, { status: 404 });
+  }
+  if (error === "confirmed") {
+    return NextResponse.json(
+      {
+        error: "This purchase is confirmed onchain and cannot be changed.",
+        code: "confirmed",
+      },
+      { status: 409 },
+    );
   }
   return NextResponse.json(
     { error: "This decision does not belong to this wallet." },

@@ -450,7 +450,17 @@ a.btn.cta:hover {
 }
 
 .landing:not(.docs-page) .hero .btn.cta {
+  min-height: 38px;
+  min-width: 9.5rem;
+  padding: 0 16px;
   border-radius: 4px;
+  transform-origin: center;
+  animation: cta-pulse 3s ease-in-out infinite;
+}
+
+.landing:not(.docs-page) .hero .btn.cta:hover,
+.landing:not(.docs-page) .hero .btn.cta:focus-visible {
+  animation: none;
 }
 
 .landing:not(.docs-page) .hero .btn.cta:hover {
@@ -691,13 +701,19 @@ a.btn.cta:hover {
 
 .app-nav {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
+  flex-direction: column;
+  gap: 0;
   padding: 12px 24px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-raised);
-  flex-wrap: wrap;
+}
+
+.app-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
 }
 
 .app-links {
@@ -728,7 +744,9 @@ a.btn.cta:hover {
 }
 
 .wallet-status {
+  position: relative;
   margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .wallet-status .btn {
@@ -736,7 +754,14 @@ a.btn.cta:hover {
 }
 
 .wallet-status .wallet-btn {
+  min-height: 40px;
+  height: 40px;
+  padding: 0 12px;
   border-radius: 4px;
+  font-size: 14px;
+  background: transparent;
+  border-color: var(--ink);
+  color: var(--ink);
 }
 
 .wallet-status .wallet-btn:hover:not(:disabled) {
@@ -750,25 +775,105 @@ a.btn.cta:hover {
   cursor: wait;
 }
 
-.wallet-chip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  animation: fade-up 0.28s var(--ease) both;
+.wallet-menu-wrap {
+  position: relative;
 }
 
-.wallet-chip .ok {
+.wallet-account {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  max-width: 100%;
+  padding: 0 10px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.wallet-account:hover,
+.wallet-account[aria-expanded="true"] {
+  background: #3b0a12;
+  border-color: #3b0a12;
+  color: #f3f1ec;
+}
+
+.wallet-account-caret {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.wallet-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  width: max-content;
+  min-width: 196px;
+  max-width: calc(100vw - 24px);
+  padding: 10px 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--ink);
+}
+
+.wallet-menu-kicker {
+  margin: 0;
+  padding: 0 12px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wallet-menu-address,
+.wallet-menu-network {
+  margin: 4px 0 0;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.wallet-menu-network {
+  margin-bottom: 8px;
+}
+
+.wallet-menu .ok {
   color: var(--ok);
 }
 
-.wallet-chip .warn {
+.wallet-menu .warn {
   color: var(--warn);
 }
 
+.wallet-menu-item {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wallet-menu-item:hover {
+  background: #3b0a12;
+  color: #f3f1ec;
+}
+
 .nav-error {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.35;
   animation: fade-up 0.25s var(--ease) both;
 }
 
@@ -881,6 +986,54 @@ a.btn.cta:hover {
   color: #c9894a;
 }
 
+.procurement-check {
+  margin-top: 28px;
+  min-width: 0;
+  max-width: 24rem;
+}
+
+.procurement-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.procurement-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(243, 241, 236, 0.1);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.procurement-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.procurement-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: #9a958c;
+  overflow-wrap: anywhere;
+}
+
+.procurement-leader {
+  flex: 1 1 auto;
+  min-width: 0.75rem;
+  border-bottom: 1px dotted #4a4742;
+  transform: translateY(-0.22em);
+}
+
+.procurement-value {
+  flex: 0 0 auto;
+  color: #f3f1ec;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .command-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -980,28 +1133,45 @@ a.btn.cta:hover {
   border-top: 1px solid #2a2824;
 }
 
-.orbio-reasoning-mark {
-  margin: 6px 0 0;
-  font-size: clamp(22px, 3vw, 32px);
-  letter-spacing: -0.04em;
-  line-height: 0.95;
+.orbio-reasoning-heading {
+  align-items: baseline;
+  flex-wrap: wrap;
+  row-gap: 2px;
 }
 
-.orbio-reasoning-mark.buy {
+.orbio-reasoning-chevron {
+  color: #9a958c;
+  letter-spacing: 0;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.orbio-reasoning-action {
+  letter-spacing: 0.08em;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.orbio-reasoning-action.buy {
   color: var(--command-buy);
 }
 
-.orbio-reasoning-mark.wait {
+.orbio-reasoning-action.wait {
   color: #c9894a;
 }
 
-.orbio-reasoning-mark.unavailable {
-  color: #9a958c;
+.orbio-reasoning-unavailable {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  font-weight: 400;
+  color: #cfc9be;
 }
 
 .orbio-reasoning-disagree,
 .orbio-reasoning-agree {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 12px;
   letter-spacing: 0.04em;
 }
@@ -1022,13 +1192,34 @@ a.btn.cta:hover {
   color: #cfc9be;
 }
 
-.orbio-reasoning-risks {
-  margin: 8px 0 0;
-  padding-left: 1.1rem;
+.orbio-considerations {
+  width: 100%;
   max-width: 28rem;
-  color: #9a958c;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: #f3f1ec;
+  color: #171614;
+}
+
+.orbio-considerations-label {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #5c5953;
+}
+
+.orbio-considerations ul {
+  margin: 0;
+  padding-left: 1.05rem;
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.45;
+  overflow-wrap: break-word;
+}
+
+.orbio-considerations li + li {
+  margin-top: 4px;
 }
 
 .command-center .decision-amount {
@@ -1598,8 +1789,8 @@ a.btn:hover {
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--muted);
-  font-weight: 500;
+  color: #3b0a12;
+  font-weight: 700;
 }
 
 .history-row {
@@ -1615,9 +1806,9 @@ a.btn:hover {
 
 .history-heading {
   margin: 0 0 8px;
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 500;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.01em;
   color: var(--ink);
 }
 
@@ -1650,9 +1841,17 @@ a.btn:hover {
 }
 
 .history-panel > h2,
-.performance-panel > h2,
-.performance-panel .performance-activity h3 {
+.performance-panel > h2 {
   color: #3b0a12;
+}
+
+.history-panel > h2,
+.performance-panel > h2 {
+  margin-bottom: 10px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
 }
 
 .history-empty .btn.secondary,
@@ -1676,15 +1875,19 @@ a.btn:hover {
   margin: 0 0 22px;
   max-width: 38rem;
   min-width: 0;
+  padding: 18px 20px;
+  background: #3b0a12;
+  border-radius: 6px;
+  color: #f3f1ec;
 }
 
 .status-guide-title {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   font-weight: 600;
-  color: var(--ink);
+  color: #f3f1ec;
 }
 
 .status-guide-list {
@@ -1704,16 +1907,16 @@ a.btn:hover {
   min-width: 0;
   font-size: 13px;
   line-height: 1.45;
-  color: var(--muted);
+  color: rgba(243, 241, 236, 0.82);
 }
 
 .status-guide-label {
-  font-weight: 500;
-  color: var(--ink);
+  font-weight: 600;
+  color: #f3f1ec;
 }
 
 .status-guide-sep {
-  color: var(--muted);
+  color: rgba(243, 241, 236, 0.5);
 }
 
 .status-guide-copy {
@@ -1774,16 +1977,13 @@ a.btn:hover {
   padding: 28px 24px 32px;
 }
 
-.performance-panel > h2 {
-  margin-bottom: 12px;
-}
-
 .performance-intro {
-  margin: 0;
+  margin: 0 0 24px;
   max-width: 36rem;
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--muted);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--ink);
 }
 
 .performance-focus {
@@ -1813,8 +2013,10 @@ a.btn:hover {
 
 .performance-activity {
   margin-top: 36px;
-  padding-top: 20px;
-  border-top: 1px solid var(--line);
+  padding: 20px 24px 22px;
+  background: #3b0a12;
+  border-radius: 6px;
+  color: #f3f1ec;
 }
 
 .performance-activity h3 {
@@ -1822,8 +2024,8 @@ a.btn:hover {
   font-size: 11px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  font-weight: 500;
-  color: var(--muted);
+  font-weight: 600;
+  color: #f3f1ec;
 }
 
 .performance-metrics {
@@ -1845,7 +2047,7 @@ a.btn:hover {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   font-weight: 500;
-  color: var(--muted);
+  color: rgba(243, 241, 236, 0.78);
 }
 
 .performance-metric-value {
@@ -1854,16 +2056,13 @@ a.btn:hover {
   font-weight: 500;
   letter-spacing: -0.03em;
   line-height: 1.1;
-  color: var(--ink);
+  color: #f3f1ec;
   overflow-wrap: anywhere;
 }
 
-.performance-metric-value.is-buy {
-  color: var(--buy);
-}
-
+.performance-metric-value.is-buy,
 .performance-metric-value.is-confirmed {
-  color: var(--ok);
+  color: #f3f1ec;
 }
 
 .performance-cta {
@@ -2007,6 +2206,20 @@ a.btn:hover {
   }
 }
 
+@keyframes cta-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    background-color: var(--ink);
+    border-color: var(--ink);
+  }
+  50% {
+    transform: scale(1.04);
+    background-color: #3b0a12;
+    border-color: #3b0a12;
+  }
+}
+
 @keyframes pulse-text {
   0%,
   100% {
@@ -2047,6 +2260,10 @@ a.btn:hover {
   .command-metrics,
   .command-action-row {
     grid-template-columns: 1fr;
+  }
+
+  .procurement-check {
+    max-width: none;
   }
 
   .command-center {
@@ -2138,12 +2355,43 @@ a.btn:hover {
   }
 
   .app-nav {
-    align-items: flex-start;
+    padding: 8px 12px;
+  }
+
+  .app-nav-bar {
+    gap: 8px;
+  }
+
+  .app-links {
+    gap: 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .app-links::-webkit-scrollbar {
+    display: none;
+  }
+
+  .app-links a,
+  .app-links .nav-link {
+    font-size: 13px;
   }
 
   .wallet-status {
     margin-left: 0;
-    width: 100%;
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .wallet-status .wallet-btn {
+    font-size: 14px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .wallet-account {
+    padding-left: 10px;
+    padding-right: 10px;
   }
 
   .history {

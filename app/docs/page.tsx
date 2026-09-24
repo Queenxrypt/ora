@@ -71,9 +71,13 @@ export default function DocsPage() {
                 </p>
                 <p>
                   Ora then inspects the live depth. A level qualifies when its
-                  discount is at least your minimum discount. BUY is offered only
-                  if a qualifying level has enough CREDIT to fulfill the requested
-                  amount. Otherwise Ora waits.
+                  discount is at least your minimum discount. If no qualifying
+                  level can fill the requested amount, Ora waits. A qualifying
+                  book is not the fill. Before BUY is presented, Ora checks an
+                  executable quote for that same amount, including the exchange
+                  fee. BUY is presented only when that quote meets the minimum
+                  discount and the spending limit. Otherwise Ora waits. The
+                  purchase still re-checks a fresh quote before signing.
                 </p>
                 <p>
                   If the best qualifying level cannot fill the request, Ora does

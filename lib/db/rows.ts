@@ -1,6 +1,7 @@
 import type {
   DecisionAction,
   DecisionRecord,
+  ExecutableTerms,
   ExecutionStatus,
   MarketSnapshot,
   OraReasoning,
@@ -21,6 +22,7 @@ export type DecisionRow = {
   quote_price: number | null;
   quoted_usdg: number | null;
   quoted_at: string | null;
+  validated_block: number | null;
   execution_price: number | null;
   tx_hash: string | null;
   execution_status: ExecutionStatus | null;
@@ -48,23 +50,36 @@ function optionalNumber(value: unknown): number | null {
   return n == null ? null : n;
 }
 
+type StoredSnapshot = MarketSnapshot & {
+  decisionExecutable?: ExecutableTerms;
+  decisionSpendingLimitUsdg?: number;
+};
+
 export function recordToRow(record: DecisionRecord): DecisionRow {
   const walletAddress = normalizeWalletAddress(record.walletAddress);
   if (!walletAddress) {
     throw new Error("walletAddress is required to persist a decision.");
   }
+  const snapshot: StoredSnapshot = {
+    ...record.snapshot,
+    ...(record.executable ? { decisionExecutable: record.executable } : {}),
+    ...(record.evaluatedSpendingLimitUsdg != null
+      ? { decisionSpendingLimitUsdg: record.evaluatedSpendingLimitUsdg }
+      : {}),
+  };
   return {
     id: record.id,
     wallet_address: walletAddress,
     timestamp: record.timestamp,
     market: record.market,
-    snapshot: record.snapshot,
+    snapshot: snapshot as MarketSnapshot,
     decision: record.decision,
     reason: record.reason,
     requested_amount: optionalNumber(record.requestedAmount),
     quote_price: optionalNumber(record.quotePrice),
     quoted_usdg: optionalNumber(record.quotedUsdg),
     quoted_at: asString(record.quotedAt) ?? null,
+    validated_block: optionalNumber(record.validatedBlock),
     execution_price: optionalNumber(record.executionPrice),
     tx_hash: asString(record.txHash) ?? null,
     execution_status: record.executionStatus ?? null,
@@ -78,17 +93,20 @@ export function recordToRow(record: DecisionRecord): DecisionRow {
 
 export function rowToRecord(row: DecisionRow): DecisionRecord {
   const walletAddress = normalizeWalletAddress(row.wallet_address) ?? undefined;
+  const stored = row.snapshot as StoredSnapshot;
+  const { decisionExecutable, decisionSpendingLimitUsdg, ...snapshot } = stored;
   return {
     id: row.id,
     timestamp: row.timestamp,
     market: row.market,
-    snapshot: row.snapshot,
+    snapshot: snapshot as MarketSnapshot,
     decision: row.decision,
     reason: row.reason,
     requestedAmount: asNumber(row.requested_amount),
     quotePrice: asNumber(row.quote_price),
     quotedUsdg: asNumber(row.quoted_usdg),
     quotedAt: asString(row.quoted_at),
+    validatedBlock: asNumber(row.validated_block),
     executionPrice: asNumber(row.execution_price),
     txHash: asString(row.tx_hash),
     executionStatus: row.execution_status ?? undefined,
@@ -98,6 +116,10 @@ export function rowToRecord(row: DecisionRow): DecisionRecord {
     confirmedAt: asString(row.confirmed_at),
     ...(walletAddress ? { walletAddress } : {}),
     ...(row.reasoning ? { reasoning: row.reasoning } : {}),
+    ...(decisionExecutable ? { executable: decisionExecutable } : {}),
+    ...(decisionSpendingLimitUsdg != null
+      ? { evaluatedSpendingLimitUsdg: decisionSpendingLimitUsdg }
+      : {}),
   };
 }
 
@@ -116,6 +138,8 @@ export function patchToRow(
   if ("quotePrice" in patch) row.quote_price = optionalNumber(patch.quotePrice);
   if ("quotedUsdg" in patch) row.quoted_usdg = optionalNumber(patch.quotedUsdg);
   if ("quotedAt" in patch) row.quoted_at = asString(patch.quotedAt) ?? null;
+  if ("validatedBlock" in patch)
+    row.validated_block = optionalNumber(patch.validatedBlock);
   if ("executionPrice" in patch)
     row.execution_price = optionalNumber(patch.executionPrice);
   if ("txHash" in patch) row.tx_hash = asString(patch.txHash) ?? null;

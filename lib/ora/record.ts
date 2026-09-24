@@ -26,5 +26,7 @@ export function recordFromDecision(
     requestedAmount: decision.requestedAmount,
     ...rest,
     walletAddress,
+    ...(decision.executable ? { executable: decision.executable } : {}),
+    evaluatedSpendingLimitUsdg: decision.params.spendingLimitUsdg,
   };
 }

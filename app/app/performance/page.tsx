@@ -121,7 +121,6 @@ export default function PerformancePage() {
 
             {view === "measured" && (
               <div className="report-block">
-                <h3>Measured outcomes</h3>
                 <div className="row">
                   <span className="label">Measured outcomes</span>
                   <span className="value">{measuredOutcomes.length}</span>

@@ -85,5 +85,18 @@
     "stateMutability": "view",
     "inputs": [],
     "outputs": [{ "type": "uint256" }]
+  },
+  {
+    "name": "Bought",
+    "type": "event",
+    "anonymous": false,
+    "inputs": [
+      { "type": "address", "name": "buyer", "indexed": true },
+      { "type": "address", "name": "recipient", "indexed": true },
+      { "type": "uint256", "name": "creditOut", "indexed": false },
+      { "type": "uint256", "name": "usdgSpent", "indexed": false },
+      { "type": "uint256", "name": "feeAtoms", "indexed": false },
+      { "type": "uint256", "name": "fills", "indexed": false }
+    ]
   }
 ]
