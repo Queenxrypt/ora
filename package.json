@@ -19,12 +19,16 @@
     "test:receipt": "tsx lib/orbio/receipt.check.ts",
     "test:validate": "tsx lib/ora/validate-lifecycle.check.ts",
     "test:confirm": "tsx lib/orbio/confirm.check.ts",
-    "test:integrity": "tsx lib/orbio/execution-integrity.check.ts"
+    "test:integrity": "tsx lib/orbio/execution-integrity.check.ts",
+    "test:wallet": "tsx lib/wallet/connection.check.ts"
   },
   "dependencies": {
     "@openrouter/sdk": "^1.3.1",
+    "@reown/appkit": "^1.8.24",
+    "@reown/appkit-adapter-ethers": "^1.8.24",
     "@supabase/supabase-js": "^2.116.0",
     "dotenv": "^16.4.7",
+    "ethers": "^6.17.0",
     "next": "^15.5.3",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

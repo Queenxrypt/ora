@@ -36,7 +36,7 @@ export function AppNav() {
   const menuRef = useRef<HTMLDivElement>(null);
   const connected = Boolean(address);
   const wrongNetwork = connected && chainId !== ROBINHOOD_CHAIN_ID;
-  const networkLabel = wrongNetwork ? `Chain ${chainId}` : "Robinhood 4663";
+  const networkLabel = wrongNetwork ? `Chain ${chainId ?? "unknown"}` : "Robinhood 4663";
 
   useEffect(() => {
     setNavReady(true);
@@ -87,9 +87,10 @@ export function AppNav() {
               className={`btn wallet-btn${connecting ? " is-connecting" : ""}`}
               type="button"
               disabled={connecting}
-              onClick={() =>
-                void connect().catch((err: Error) => setError(err.message))
-              }
+              onClick={() => {
+                setError(null);
+                void connect().catch((err: Error) => setError(err.message));
+              }}
             >
               {connecting ? "Connecting…" : "Connect wallet"}
             </button>
@@ -122,7 +123,9 @@ export function AppNav() {
                       role="menuitem"
                       onClick={() => {
                         setMenuOpen(false);
-                        void switchToRobinhood();
+                        void switchToRobinhood().catch((err: Error) =>
+                          setError(err.message),
+                        );
                       }}
                     >
                       Switch network

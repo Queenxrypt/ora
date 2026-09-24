@@ -61,6 +61,7 @@ export function OraDeskPage() {
   const {
     address,
     chainId,
+    ethereumProvider,
     usdgBalance: balanceUsdg,
     nativeBalance,
     refreshBalance,
@@ -584,9 +585,9 @@ export function OraDeskPage() {
       return;
     }
 
-    const provider = window.ethereum;
+    const provider = ethereumProvider;
     if (!provider) {
-      setError("No injected wallet found. No transaction was sent.");
+      setError("Connected wallet cannot sign this transaction. No transaction was sent.");
       return;
     }
 
