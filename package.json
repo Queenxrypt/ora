@@ -13,6 +13,7 @@
     "test:outcomes": "tsx lib/ora/outcomes.check.ts",
     "test:reasoning": "tsx lib/ora/reasoning.check.ts",
     "test:store": "tsx lib/db/rows.check.ts",
+    "test:history": "tsx lib/db/history-audit.check.ts",
     "test:ledger": "tsx lib/db/ledger-mutation.check.ts",
     "test:evaluation": "tsx lib/ora/evaluation.check.ts",
     "test:quote-amount": "tsx lib/ora/quote-amount.check.ts",

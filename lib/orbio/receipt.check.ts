@@ -609,6 +609,8 @@ function decisionRow(id: string, overrides: Partial<DecisionRow> = {}): Decision
     quoted_usdg: 1,
     quoted_at: "2026-09-23T15:00:00.000Z",
     validated_block: 0x434a236,
+    min_discount_percent: null,
+    evaluated_requested_credit: null,
     execution_price: null,
     tx_hash: null,
     execution_status: "awaiting_signature",

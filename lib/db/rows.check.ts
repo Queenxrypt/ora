@@ -22,6 +22,7 @@ const sample: DecisionRecord = {
   walletAddress: "0x63fc81ed1e1eab3e2906b578ccd3097970852a1b",
   executionStatus: "pending",
   txHash: "0xabc",
+  minDiscountPercent: 20,
   reasoning: {
     recommendation: "WAIT",
     rationale: "Depth is thin.",
@@ -40,6 +41,9 @@ if (row.requested_amount !== 5) {
 if (!row.reasoning || row.reasoning.recommendation !== "WAIT") {
   throw new Error("reasoning must persist");
 }
+if (row.min_discount_percent !== 20) {
+  throw new Error("min_discount_percent must persist");
+}
 
 const back = rowToRecord(row);
 if (back.decision !== "BUY" || back.walletAddress !== sample.walletAddress) {
@@ -47,6 +51,9 @@ if (back.decision !== "BUY" || back.walletAddress !== sample.walletAddress) {
 }
 if (back.reasoning?.agreesWithRule !== false) {
   throw new Error("Reasoning disagreement must persist");
+}
+if (back.minDiscountPercent !== 20) {
+  throw new Error("Decision criteria must round-trip");
 }
 
 const cleared = patchToRow({ blockedReason: undefined, executionStatus: "success" });
@@ -63,6 +70,15 @@ const ignoredWallet = patchToRow({
 });
 if ("wallet_address" in ignoredWallet) {
   throw new Error("Patch must not retarget wallet_address");
+}
+
+const criteriaLocked = patchToRow({
+  minDiscountPercent: 1,
+  evaluatedRequestedCredit: 999,
+  executionStatus: "failed",
+});
+if ("min_discount_percent" in criteriaLocked || "evaluated_requested_credit" in criteriaLocked) {
+  throw new Error("Execution patches must not rewrite decision criteria");
 }
 
 console.log("store row mapping ok");

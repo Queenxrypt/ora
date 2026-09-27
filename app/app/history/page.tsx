@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import HistoryDetail from "../../../components/HistoryDetail";
 import type { DecisionRecord } from "../../../types/ora";
 import {
   formatTime,
@@ -16,6 +17,7 @@ export default function HistoryPage() {
   const [history, setHistory] = useState<DecisionRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -28,6 +30,8 @@ export default function HistoryPage() {
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
   }, [address]);
+
+  const selected = history.find((item) => item.id === selectedId) ?? null;
 
   return (
     <main className="desk">
@@ -122,7 +126,29 @@ export default function HistoryPage() {
             </thead>
             <tbody>
               {history.map((item) => (
-                <tr key={item.id}>
+                <tr
+                  key={item.id}
+                  className={
+                    item.id === selected?.id
+                      ? "history-row is-selected"
+                      : "history-row"
+                  }
+                  tabIndex={0}
+                  aria-selected={item.id === selected?.id}
+                  onClick={() =>
+                    setSelectedId((current) =>
+                      current === item.id ? null : item.id,
+                    )
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedId((current) =>
+                        current === item.id ? null : item.id,
+                      );
+                    }
+                  }}
+                >
                   <td>{formatTime(item.timestamp)}</td>
                   <td className={item.decision === "BUY" ? "action-buy" : "action-wait"}>
                     {item.decision}
@@ -144,6 +170,12 @@ export default function HistoryPage() {
             </tbody>
           </table>
           </div>
+          {selected && (
+            <HistoryDetail
+              record={selected}
+              onClose={() => setSelectedId(null)}
+            />
+          )}
           </>
         )}
       </section>

@@ -23,6 +23,8 @@ export type DecisionRow = {
   quoted_usdg: number | null;
   quoted_at: string | null;
   validated_block: number | null;
+  min_discount_percent: number | null;
+  evaluated_requested_credit: number | null;
   execution_price: number | null;
   tx_hash: string | null;
   execution_status: ExecutionStatus | null;
@@ -80,6 +82,8 @@ export function recordToRow(record: DecisionRecord): DecisionRow {
     quoted_usdg: optionalNumber(record.quotedUsdg),
     quoted_at: asString(record.quotedAt) ?? null,
     validated_block: optionalNumber(record.validatedBlock),
+    min_discount_percent: optionalNumber(record.minDiscountPercent),
+    evaluated_requested_credit: optionalNumber(record.evaluatedRequestedCredit),
     execution_price: optionalNumber(record.executionPrice),
     tx_hash: asString(record.txHash) ?? null,
     execution_status: record.executionStatus ?? null,
@@ -107,6 +111,8 @@ export function rowToRecord(row: DecisionRow): DecisionRecord {
     quotedUsdg: asNumber(row.quoted_usdg),
     quotedAt: asString(row.quoted_at),
     validatedBlock: asNumber(row.validated_block),
+    minDiscountPercent: asNumber(row.min_discount_percent),
+    evaluatedRequestedCredit: asNumber(row.evaluated_requested_credit),
     executionPrice: asNumber(row.execution_price),
     txHash: asString(row.tx_hash),
     executionStatus: row.execution_status ?? undefined,

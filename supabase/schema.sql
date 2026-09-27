@@ -22,6 +22,8 @@ create table if not exists public.decisions (
   total_usdg_paid double precision,
   confirmed_at timestamptz,
   reasoning jsonb,
+  min_discount_percent double precision,
+  evaluated_requested_credit double precision,
   created_at timestamptz not null default now()
 );
 

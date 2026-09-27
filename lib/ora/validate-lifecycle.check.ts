@@ -157,6 +157,8 @@ function decisionRow(status: ExecutionStatus | null): DecisionRow {
     quoted_usdg: null,
     quoted_at: null,
     validated_block: null,
+    min_discount_percent: null,
+    evaluated_requested_credit: null,
     execution_price: null,
     tx_hash: null,
     execution_status: status,
@@ -195,7 +197,6 @@ async function post(
   const quote = quoted.body.quote as ExecutableQuote;
   assert(quote.requestedCredit === 5 && quote.totalUsdg === 3.75, "quote is for the decided 5 CREDIT");
   assert(statusOf() === "review", "quote leaves the decision in review");
-
   const validated = await post(validateRoute, "/api/execute/validate", {
     decisionId: "dec-1",
     quote,
@@ -219,6 +220,38 @@ async function post(
   assert(again.status === 409 && again.body.code === "not_signable", "repeat validate rejected");
   assert(JSON.stringify(rows[0]) === snapshot, "repeat validate writes nothing");
   assert(calls.writes === before.writes, "repeat validate issues no update");
+}
+
+// A browser-supplied quote cannot replace the server quote.
+{
+  rows = [decisionRow(null)];
+  const quoted = await post(quoteRoute, "/api/quote", { decisionId: "dec-1", walletAddress: WALLET });
+  const quote = quoted.body.quote as ExecutableQuote;
+  const forged = {
+    ...quote,
+    feeAtoms: 99,
+    discountPercent: 1,
+    creditOut: 1,
+    quotePrice: 0.01,
+    totalUsdg: quote.totalUsdg,
+  };
+  const validated = await post(validateRoute, "/api/execute/validate", {
+    decisionId: "dec-1",
+    quote: forged,
+    walletAddress: WALLET,
+    creditAcquired: 999,
+    totalUsdgPaid: 0.01,
+    executionPrice: 0.01,
+    txHash: `0x${"ab".repeat(32)}`,
+  });
+  assert(validated.status === 200, "matching total still validates from the server quote");
+  assert(rows[0].quoted_usdg === 3.75, "client USDG total is not stored");
+  assert(rows[0].quote_price === 0.75, "client quote price is not stored");
+  assert(rows[0].credit_acquired == null, "validation does not store client CREDIT acquired");
+  assert(rows[0].total_usdg_paid == null, "validation does not store client USDG paid");
+  assert(rows[0].execution_price == null, "validation does not store a client execution price");
+  assert(rows[0].tx_hash == null, "validation does not store a client transaction hash");
+  assert(rows[0].execution_status === "awaiting_signature", "forged amounts do not confirm the decision");
 }
 
 // Signable statuses from canReviewDecision still reach the live checks.

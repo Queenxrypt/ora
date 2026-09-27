@@ -110,6 +110,13 @@ export type DecisionRecord = {
   executable?: ExecutableTerms;
   /** Spending limit this decision was evaluated against. Absent on older rows. */
   evaluatedSpendingLimitUsdg?: number;
+  /** Minimum discount this decision was evaluated against. Absent on older rows. */
+  minDiscountPercent?: number;
+  /**
+   * CREDIT size a WAIT decision was evaluated against.
+   * BUY stores that size as requestedAmount. Absent on older rows.
+   */
+  evaluatedRequestedCredit?: number;
 };
 
 export type OutcomePhase = "decision" | "execution" | "confirmed" | "outcome";

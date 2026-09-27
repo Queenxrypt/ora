@@ -284,6 +284,8 @@ function decisionRow(id: string, overrides: Partial<DecisionRow> = {}): Decision
     quoted_usdg: null,
     quoted_at: null,
     validated_block: null,
+    min_discount_percent: null,
+    evaluated_requested_credit: null,
     execution_price: null,
     tx_hash: null,
     execution_status: null,
