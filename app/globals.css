@@ -1871,12 +1871,14 @@ a.btn:hover {
 }
 
 .history-panel > h2,
-.performance-panel > h2 {
+.performance-panel > h2,
+.market-history-panel > h2 {
   color: #3b0a12;
 }
 
 .history-panel > h2,
-.performance-panel > h2 {
+.performance-panel > h2,
+.market-history-panel > h2 {
   margin-bottom: 10px;
   font-size: 28px;
   font-weight: 700;
@@ -2176,6 +2178,14 @@ a.btn:hover {
   text-underline-offset: 3px;
 }
 
+.hd-after {
+  grid-column: 1 / -1;
+}
+
+.hd-after .hd-rows {
+  margin-top: 18px;
+}
+
 @media (max-width: 900px) {
   .hd-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -2195,7 +2205,7 @@ a.btn:hover {
 }
 
 .performance-intro {
-  margin: 0 0 24px;
+  margin: 0 0 20px;
   max-width: 36rem;
   font-size: 16px;
   font-weight: 500;
@@ -2283,7 +2293,41 @@ a.btn:hover {
 }
 
 .performance-cta {
-  margin-top: 28px;
+  margin-top: 22px;
+}
+
+.performance-section {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.performance-section h3 {
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: #3b0a12;
+  margin: 0 0 10px;
+}
+
+.performance-section .row {
+  padding: 6px 0;
+}
+
+.performance-section > .status {
+  margin: 0;
+  max-width: 38rem;
+  line-height: 1.55;
+}
+
+.performance-section .history-row {
+  cursor: default;
+}
+
+.performance-section .history-row:hover,
+.performance-section .history-row:focus {
+  background: transparent;
 }
 
 .performance-empty,

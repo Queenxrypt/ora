@@ -1179,91 +1179,6 @@ export function OraDeskPage() {
         )}
       </section>
 
-      <section className="panel market-history-panel" id="market-history">
-        <h2>Market History</h2>
-        <p className="status history-intro">
-          Historical CREDIT book snapshots from scheduled observation. This is
-          not live market data.
-        </p>
-        {observationsLoading && (
-          <p className="status is-loading">Loading market history…</p>
-        )}
-        {observationError && <p className="error">{observationError}</p>}
-        {!observationsLoading && !observationError && observationCount === 0 && (
-          <div className="history-empty">
-            <h3 className="history-empty-title">No observations yet</h3>
-            <p className="status">
-              Ora hasn&apos;t recorded a successful CREDIT book snapshot yet.
-            </p>
-          </div>
-        )}
-        {!observationsLoading && !observationError && observationCount > 0 && (
-          <>
-            <p className="market-history-summary">
-              <span>
-                {observationCount} observation{observationCount === 1 ? "" : "s"}
-              </span>
-              {latestObservation && (
-                <>
-                  <span className="market-history-sep" aria-hidden="true">
-                    ·
-                  </span>
-                  <span>
-                    Latest {formatTime(latestObservation.slotStart, true)}
-                  </span>
-                </>
-              )}
-              {highestObservedDiscount != null && (
-                <>
-                  <span className="market-history-sep" aria-hidden="true">
-                    ·
-                  </span>
-                  <span>
-                    Highest discount {highestObservedDiscount}%
-                  </span>
-                </>
-              )}
-            </p>
-            <div className="table-wrap">
-              <table className="history">
-                <thead>
-                  <tr>
-                    <th>Time</th>
-                    <th>Best discount</th>
-                    <th>CREDIT at that discount</th>
-                    <th>Total available CREDIT</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {observations.map((item) => {
-                    const emptyBook = item.bestDiscountPercent == null;
-                    return (
-                      <tr
-                        className="history-row market-history-row"
-                        key={item.slotStart}
-                      >
-                        <td>{formatTime(item.slotStart, true)}</td>
-                        <td className="mono">
-                          {emptyBook ? "—" : `${item.bestDiscountPercent}%`}
-                        </td>
-                        <td className="mono">
-                          {emptyBook
-                            ? "—"
-                            : formatCredit(item.availableAtBestDiscount ?? 0)}
-                        </td>
-                        <td className="mono">
-                          {formatCredit(item.totalAvailableCredit)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </section>
-
       <section className="panel settings-panel" id="settings">
         <h2>Procurement settings</h2>
         {!isConnected && (
@@ -1369,6 +1284,87 @@ export function OraDeskPage() {
             Minimum CREDIT size supported by the live book:{" "}
             {formatCredit(market.minBuyCredit)}.
           </p>
+        )}
+      </section>
+
+      <section className="panel market-history-panel" id="market-history">
+        <h2>Market History</h2>
+        {observationsLoading && (
+          <p className="status is-loading">Loading market history…</p>
+        )}
+        {observationError && <p className="error">{observationError}</p>}
+        {!observationsLoading && !observationError && observationCount === 0 && (
+          <div className="history-empty">
+            <h3 className="history-empty-title">No observations yet</h3>
+            <p className="status">
+              Ora hasn&apos;t recorded a successful CREDIT book snapshot yet.
+            </p>
+          </div>
+        )}
+        {!observationsLoading && !observationError && observationCount > 0 && (
+          <>
+            <p className="market-history-summary">
+              <span>
+                {observationCount} observation{observationCount === 1 ? "" : "s"}
+              </span>
+              {latestObservation && (
+                <>
+                  <span className="market-history-sep" aria-hidden="true">
+                    ·
+                  </span>
+                  <span>
+                    Latest {formatTime(latestObservation.slotStart, true)}
+                  </span>
+                </>
+              )}
+              {highestObservedDiscount != null && (
+                <>
+                  <span className="market-history-sep" aria-hidden="true">
+                    ·
+                  </span>
+                  <span>
+                    Highest discount {highestObservedDiscount}%
+                  </span>
+                </>
+              )}
+            </p>
+            <div className="table-wrap">
+              <table className="history">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Best discount</th>
+                    <th>CREDIT at that discount</th>
+                    <th>Total available CREDIT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {observations.map((item) => {
+                    const emptyBook = item.bestDiscountPercent == null;
+                    return (
+                      <tr
+                        className="history-row market-history-row"
+                        key={item.slotStart}
+                      >
+                        <td>{formatTime(item.slotStart, true)}</td>
+                        <td className="mono">
+                          {emptyBook ? "—" : `${item.bestDiscountPercent}%`}
+                        </td>
+                        <td className="mono">
+                          {emptyBook
+                            ? "—"
+                            : formatCredit(item.availableAtBestDiscount ?? 0)}
+                        </td>
+                        <td className="mono">
+                          {formatCredit(item.totalAvailableCredit)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
 

@@ -127,3 +127,48 @@ export async function readSucceededObservations(
     (row) => row.outcome === "succeeded",
   );
 }
+
+const OBSERVATION_COLUMNS =
+  "slot_start, cadence_seconds, outcome, attempted_at, completed_at, levels, min_buy_credit_atoms, reported_total_credit_atoms, fingerprint, http_status, error_detail";
+
+/** Succeeded observations after `afterExclusive` through `throughInclusive`. Failures are not market state. */
+export async function readSucceededObservationsBetween(
+  afterExclusive: string,
+  throughInclusive: string,
+): Promise<ObservationRow[]> {
+  const { data, error } = await supabaseAdmin()
+    .from("market_observations")
+    .select(OBSERVATION_COLUMNS)
+    .eq("outcome", "succeeded")
+    .gt("slot_start", afterExclusive)
+    .lte("slot_start", throughInclusive)
+    .order("slot_start", { ascending: true })
+    .limit(1000);
+  throwIfError(error);
+  return ((data ?? []) as ObservationRow[]).filter(
+    (row) => row.outcome === "succeeded",
+  );
+}
+
+/** Pages through succeeded observations covering a time span. */
+export async function readSucceededObservationsCovering(
+  afterExclusive: string,
+  throughInclusive: string,
+): Promise<ObservationRow[]> {
+  const rows: ObservationRow[] = [];
+  let cursor = afterExclusive;
+  for (let page = 0; page < 20; page += 1) {
+    const batch = await readSucceededObservationsBetween(
+      cursor,
+      throughInclusive,
+    );
+    if (batch.length === 0) break;
+    const skip = rows.length > 0 && batch[0]?.slot_start === cursor ? 1 : 0;
+    for (let i = skip; i < batch.length; i += 1) rows.push(batch[i]);
+    if (batch.length < 1000) break;
+    const next = batch[batch.length - 1]?.slot_start;
+    if (!next || next === cursor) break;
+    cursor = next;
+  }
+  return rows;
+}

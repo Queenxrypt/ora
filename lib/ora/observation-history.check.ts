@@ -109,7 +109,7 @@ const deskSource = readFileSync(
 const historyIndex = deskSource.indexOf('id="market-history"');
 const settingsIndex = deskSource.indexOf('id="settings"');
 const commandClose = deskSource.indexOf('className="command-center"');
-assert(historyIndex > commandClose && historyIndex < settingsIndex, "Market History sits after live desk and before settings");
+assert(settingsIndex > commandClose && historyIndex > settingsIndex, "Market History sits after procurement settings");
 assert(!deskSource.includes("normalizeBook"), "desk history path must not call normalizeBook");
 
 console.log("observation history checks passed");

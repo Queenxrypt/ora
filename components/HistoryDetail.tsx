@@ -1,5 +1,9 @@
 import type { DecisionRecord } from "../types/ora";
 import { historyDetail, type DetailRow } from "../lib/ora/history-detail";
+import {
+  afterMarketView,
+  type MarketOutcome,
+} from "../lib/ora/outcome-engine";
 import { robinhoodChain } from "../lib/orbio/exchange";
 
 function Rows({ rows }: { rows: DetailRow[] }) {
@@ -17,14 +21,21 @@ function Rows({ rows }: { rows: DetailRow[] }) {
 
 export default function HistoryDetail({
   record,
+  after,
+  afterLoading = false,
+  afterError = null,
   onClose,
 }: {
   record: DecisionRecord;
+  after?: MarketOutcome | null;
+  afterLoading?: boolean;
+  afterError?: string | null;
   onClose: () => void;
 }) {
   const view = historyDetail(record);
   const { outcome } = view;
   const explorer = robinhoodChain.blockExplorers.default.url;
+  const afterView = after ? afterMarketView(after) : null;
 
   return (
     <div className="detail hd">
@@ -93,6 +104,23 @@ export default function HistoryDetail({
             </div>
           )}
         </section>
+
+        {(afterLoading || afterError || afterView) && (
+          <section className="hd-card hd-after">
+            <p className="hd-eyebrow">What happened after</p>
+            {afterLoading && (
+              <p className="status is-loading">Loading later observations…</p>
+            )}
+            {afterError && <p className="error">{afterError}</p>}
+            {!afterLoading && !afterError && afterView && (
+              <>
+                <p className="hd-outcome">{afterView.headline}</p>
+                {afterView.note && <p className="hd-note">{afterView.note}</p>}
+                {afterView.rows.length > 0 && <Rows rows={afterView.rows} />}
+              </>
+            )}
+          </section>
+        )}
       </div>
     </div>
   );

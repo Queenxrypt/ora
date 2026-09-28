@@ -1,7 +1,5 @@
 import type { DecisionRecord, MarketSnapshot } from "../../types/ora";
 import { evaluateDecision, isConfirmedBuy } from "./outcomes";
-import { summarizePerformance } from "./performance";
-import { buyOnDemandCost } from "./baseline";
 
 function snapshot(
   partial: Partial<MarketSnapshot> &
@@ -138,29 +136,6 @@ if (!waitLaterBetter.resolved || waitLaterBetter.useful !== true) {
 const waitNoLater = evaluateDecision(wait, null);
 if (waitNoLater.resolved || waitNoLater.phase !== "decision") {
   throw new Error("WAIT without a later book must be unresolved");
-}
-
-const summary = summarizePerformance(
-  [reviewed, failed, pending, confirmedNoLater, wait],
-  laterWorseBook,
-);
-if (summary.successfulExecutions !== 1) {
-  throw new Error("Only confirmed fills belong in performance");
-}
-if (summary.totalCreditPurchased !== 5 || summary.totalProcurementCost !== 4) {
-  throw new Error("Performance totals must use confirmed fill amounts");
-}
-if (summary.comparableBuyOnDemandCost !== buyOnDemandCost(5, laterWorseBook)) {
-  throw new Error("Comparison must use later listed CREDIT price × size");
-}
-
-const noFill = summarizePerformance([reviewed, wait], laterWorseBook);
-if (
-  noFill.successfulExecutions !== 0 ||
-  noFill.comparableBuyOnDemandCost !== null ||
-  noFill.difference !== null
-) {
-  throw new Error("Zero confirmed fills must not invent a comparison");
 }
 
 console.log("outcomes + performance ok");

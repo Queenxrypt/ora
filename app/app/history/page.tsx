@@ -4,12 +4,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import HistoryDetail from "../../../components/HistoryDetail";
 import type { DecisionRecord } from "../../../types/ora";
+import type { MarketOutcome } from "../../../lib/ora/outcome-engine";
 import {
   formatTime,
   recordStage,
   recordStageClass,
 } from "../../../lib/ora/format";
-import { walletSearchParam } from "../../../lib/ora/wallet";
+import { walletSearchParam, normalizeWalletAddress } from "../../../lib/ora/wallet";
 import { useWallet } from "../../../lib/wallet/wallet";
 
 export default function HistoryPage() {
@@ -18,6 +19,9 @@ export default function HistoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [after, setAfter] = useState<MarketOutcome | null>(null);
+  const [afterLoading, setAfterLoading] = useState(false);
+  const [afterError, setAfterError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -32,6 +36,42 @@ export default function HistoryPage() {
   }, [address]);
 
   const selected = history.find((item) => item.id === selectedId) ?? null;
+
+  useEffect(() => {
+    const wallet = normalizeWalletAddress(address);
+    if (!selectedId || !wallet) {
+      setAfter(null);
+      setAfterError(null);
+      setAfterLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setAfter(null);
+    setAfterLoading(true);
+    setAfterError(null);
+    const params = new URLSearchParams({
+      wallet,
+      id: selectedId,
+    });
+    void fetch(`/api/outcomes?${params.toString()}`, { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Outcome unavailable");
+        if (!cancelled) setAfter(data.outcome ?? null);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) {
+          setAfter(null);
+          setAfterError(err.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAfterLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, address]);
 
   return (
     <main className="desk">
@@ -173,6 +213,9 @@ export default function HistoryPage() {
           {selected && (
             <HistoryDetail
               record={selected}
+              after={after}
+              afterLoading={afterLoading}
+              afterError={afterError}
               onClose={() => setSelectedId(null)}
             />
           )}

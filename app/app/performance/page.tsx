@@ -1,79 +1,32 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import type {
-  DecisionOutcome,
-  PerformanceSummary,
-} from "../../../types/ora";
-import { formatCredit, formatPrice, recordStage } from "../../../lib/ora/format";
+import { useEffect, useState } from "react";
+import { formatCredit, formatPrice, formatTime } from "../../../lib/ora/format";
+import type { PerformanceReport } from "../../../lib/ora/performance";
 import { walletSearchParam } from "../../../lib/ora/wallet";
 import { useWallet } from "../../../lib/wallet/wallet";
 
-function executionStage(
-  outcome: DecisionOutcome,
-): "Confirmed" | "Pending" | "Failed" | null {
-  if (outcome.kind !== "BUY") return null;
-  const stage = recordStage(outcome.executionStatus, "BUY");
-  if (stage === "Confirmed" || stage === "Pending" || stage === "Failed") {
-    return stage;
-  }
-  return null;
-}
-
 export default function PerformancePage() {
   const { address } = useWallet();
-  const [performance, setPerformance] = useState<PerformanceSummary | null>(
-    null,
-  );
-  const [outcomes, setOutcomes] = useState<DecisionOutcome[]>([]);
+  const [performance, setPerformance] = useState<PerformanceReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setPerformance(null);
+    setError(null);
     void fetch(`/api/performance${walletSearchParam(address)}`, { cache: "no-store" })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? "Unavailable");
         setPerformance(data.performance ?? null);
-        setOutcomes(data.outcomes ?? []);
       })
       .catch((err: Error) => setError(err.message));
   }, [address]);
 
-  const confirmedPurchases = performance?.successfulExecutions ?? 0;
-  const hasDecisionActivity =
-    (performance?.buyCount ?? 0) + (performance?.waitCount ?? 0) > 0;
-
-  const executionCounts = useMemo(() => {
-    let pending = 0;
-    let failed = 0;
-    for (const outcome of outcomes) {
-      const stage = executionStage(outcome);
-      if (stage === "Pending") pending += 1;
-      if (stage === "Failed") failed += 1;
-    }
-    return { pending, failed };
-  }, [outcomes]);
-
-  const measuredOutcomes = useMemo(
-    () =>
-      outcomes.filter(
-        (item) =>
-          item.kind === "BUY" && item.resolved && item.phase === "outcome",
-      ),
-    [outcomes],
-  );
-
-  const view =
-    confirmedPurchases === 0
-      ? "empty"
-      : measuredOutcomes.length === 0
-        ? "awaiting"
-        : "measured";
-
-  const showExecutionCounts =
-    view !== "empty" &&
-    (executionCounts.pending > 0 || executionCounts.failed > 0);
+  const showBuilding =
+    performance != null && (!performance.hasDecisions || !performance.hasEvidence);
+  const showStory = performance != null && performance.hasEvidence;
 
   return (
     <main className="desk">
@@ -86,141 +39,165 @@ export default function PerformancePage() {
         {performance && (
           <>
             <p className="status performance-intro">
-              Measure whether Ora&apos;s procurement decisions lead to better
-              CREDIT acquisition outcomes.
+              Confirmed purchases, decisions, and what happened afterward.
             </p>
 
-            {view === "empty" && (
+            {showBuilding && (
               <div className="performance-focus">
                 <h3 className="performance-focus-title">
-                  No measured performance yet
+                  Performance data is still building
                 </h3>
                 <p className="status">
-                  You haven&apos;t completed a CREDIT purchase yet.
-                </p>
-                <p className="status">
-                  Performance will appear after a purchase is confirmed and a
-                  later market snapshot is available.
+                  Ora needs more confirmed procurement decisions and completed
+                  outcome windows before a meaningful comparison can be shown.
                 </p>
               </div>
             )}
 
-            {view === "awaiting" && (
-              <div className="report-block">
-                <h3>Awaiting measurement</h3>
-                <p className="status">
-                  Purchase confirmed. Performance measurement will appear after
-                  a later market snapshot is available.
-                </p>
-                <div className="row">
-                  <span className="label">Confirmed purchases</span>
-                  <span className="value">{confirmedPurchases}</span>
-                </div>
-              </div>
-            )}
-
-            {view === "measured" && (
-              <div className="report-block">
-                <div className="row">
-                  <span className="label">Measured outcomes</span>
-                  <span className="value">{measuredOutcomes.length}</span>
-                </div>
-                <div className="row">
-                  <span className="label">Confirmed purchases</span>
-                  <span className="value">{confirmedPurchases}</span>
-                </div>
+            {showStory && performance.procurement && (
+              <div className="performance-section">
+                <h3>Procurement</h3>
                 <div className="row">
                   <span className="label">CREDIT purchased</span>
                   <span className="value">
-                    {formatCredit(performance.totalCreditPurchased)}
+                    {formatCredit(performance.procurement.creditPurchased)}
                   </span>
                 </div>
                 <div className="row">
-                  <span className="label">Total procurement cost</span>
+                  <span className="label">USDG spent</span>
                   <span className="value">
-                    {formatPrice(performance.totalProcurementCost)} USDG
+                    {formatPrice(performance.procurement.usdgSpent)} USDG
                   </span>
                 </div>
-                {performance.averageEffectivePrice != null && (
+                {performance.procurement.averageExecutionPrice != null && (
                   <div className="row">
-                    <span className="label">Average effective price</span>
+                    <span className="label">Average execution price</span>
                     <span className="value">
-                      {formatPrice(performance.averageEffectivePrice)} USDG
+                      {formatPrice(performance.procurement.averageExecutionPrice)}{" "}
+                      USDG
                     </span>
                   </div>
                 )}
-                {performance.comparableBuyOnDemandCost != null && (
+                {performance.procurement.averageExecutionDiscount != null && (
                   <div className="row">
-                    <span className="label">Later buy-on-demand cost</span>
+                    <span className="label">Average execution discount</span>
                     <span className="value">
-                      {formatPrice(performance.comparableBuyOnDemandCost)} USDG
+                      {performance.procurement.averageExecutionDiscount}%
                     </span>
                   </div>
                 )}
-                {performance.difference != null && (
-                  <div className="row">
-                    <span className="label">Difference vs Ora</span>
-                    <span className="value">
-                      {formatPrice(performance.difference)} USDG
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {(view === "empty" || hasDecisionActivity) && (
-              <div className="performance-activity">
-                <h3>Activity</h3>
-                <div className="performance-metrics">
-                  <div className="performance-metric">
-                    <span className="performance-metric-label">BUY</span>
-                    <span
-                      className={
-                        performance.buyCount > 0
-                          ? "performance-metric-value is-buy"
-                          : "performance-metric-value"
-                      }
-                    >
-                      {performance.buyCount}
-                    </span>
-                  </div>
-                  <div className="performance-metric">
-                    <span className="performance-metric-label">WAIT</span>
-                    <span className="performance-metric-value">
-                      {performance.waitCount}
-                    </span>
-                  </div>
-                  <div className="performance-metric">
-                    <span className="performance-metric-label">Confirmed</span>
-                    <span
-                      className={
-                        confirmedPurchases > 0
-                          ? "performance-metric-value is-confirmed"
-                          : "performance-metric-value"
-                      }
-                    >
-                      {confirmedPurchases}
-                    </span>
-                  </div>
+                <div className="row">
+                  <span className="label">Confirmed purchases</span>
+                  <span className="value">
+                    {performance.procurement.confirmedPurchases}
+                  </span>
                 </div>
               </div>
             )}
 
-            {showExecutionCounts && (
-              <div className="report-block">
-                <h3>Execution</h3>
-                {executionCounts.pending > 0 && (
-                  <div className="row">
-                    <span className="label">Pending</span>
-                    <span className="value">{executionCounts.pending}</span>
-                  </div>
-                )}
-                {executionCounts.failed > 0 && (
-                  <div className="row">
-                    <span className="label">Failed</span>
-                    <span className="value">{executionCounts.failed}</span>
-                  </div>
-                )}
+            {performance.hasDecisions && (
+              <div className="performance-section">
+                <h3>Decisions</h3>
+                <div className="row">
+                  <span className="label">BUY</span>
+                  <span className="value">{performance.decisions.buyCount}</span>
+                </div>
+                <div className="row">
+                  <span className="label">WAIT</span>
+                  <span className="value">{performance.decisions.waitCount}</span>
+                </div>
+                <div className="row">
+                  <span className="label">Total decisions</span>
+                  <span className="value">{performance.decisions.total}</span>
+                </div>
+                <div className="row">
+                  <span className="label">Completed outcome evaluations</span>
+                  <span className="value">
+                    {performance.decisions.completedOutcomes}
+                  </span>
+                </div>
+                <div className="row">
+                  <span className="label">Pending outcome evaluations</span>
+                  <span className="value">
+                    {performance.decisions.pendingOutcomes}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {showStory && (
+              <div className="performance-section">
+                <h3>Outcomes</h3>
+                <div className="row">
+                  <span className="label">WAIT → qualifying opportunity observed</span>
+                  <span className="value">{performance.outcomes.waitQualifying}</span>
+                </div>
+                <div className="row">
+                  <span className="label">WAIT → no qualifying opportunity observed</span>
+                  <span className="value">{performance.outcomes.waitNone}</span>
+                </div>
+                <div className="row">
+                  <span className="label">BUY → better observed opportunity later</span>
+                  <span className="value">{performance.outcomes.buyBetter}</span>
+                </div>
+                <div className="row">
+                  <span className="label">BUY → no better observed opportunity later</span>
+                  <span className="value">{performance.outcomes.buyNone}</span>
+                </div>
+                <div className="row">
+                  <span className="label">Still being evaluated</span>
+                  <span className="value">{performance.outcomes.pending}</span>
+                </div>
+              </div>
+            )}
+
+            {performance.hasDecisions && (
+              <div className="performance-section">
+                <h3>Comparison</h3>
+                <p className="status">{performance.comparison.detail}</p>
+              </div>
+            )}
+
+            {showStory && performance.history.length > 0 && (
+              <div className="performance-section">
+                <h3>After the decision</h3>
+                <div className="table-wrap">
+                  <table className="history">
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Decision</th>
+                        <th>Discount</th>
+                        <th>Result</th>
+                        <th>Later</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {performance.history.map((row, index) => (
+                        <tr
+                          className="history-row"
+                          key={`${row.timestamp}-${row.action}-${index}`}
+                        >
+                          <td>{formatTime(row.timestamp)}</td>
+                          <td
+                            className={
+                              row.action === "BUY" ? "action-buy" : "action-wait"
+                            }
+                          >
+                            {row.action}
+                          </td>
+                          <td className="mono">{row.observedDiscountPercent}%</td>
+                          <td>{row.status}</td>
+                          <td className="mono">
+                            {row.laterDiscountPercent != null
+                              ? `${row.laterDiscountPercent}% · ${row.appearedAfter}`
+                              : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
