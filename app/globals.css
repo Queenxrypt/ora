@@ -1541,6 +1541,7 @@ a.btn:hover {
 
 .settings-panel,
 .history-panel,
+.market-history-panel,
 .performance-panel,
 .panel-execution {
   transition: border-color 0.2s var(--ease);
@@ -1803,6 +1804,34 @@ a.btn:hover {
 .history-row.is-selected {
   background: #efece4;
   outline: none;
+}
+
+.market-history-panel {
+  padding: 20px 24px 18px;
+}
+
+.market-history-summary {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.2rem;
+  align-items: baseline;
+}
+
+.market-history-sep {
+  margin: 0 6px;
+  color: var(--line-strong, #cfc8bc);
+}
+
+.market-history-panel .history-row {
+  cursor: default;
+}
+
+.market-history-panel .history-row:hover,
+.market-history-panel .history-row:focus {
+  background: transparent;
 }
 
 .history-heading {

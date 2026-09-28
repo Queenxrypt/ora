@@ -107,3 +107,23 @@ export async function completeObservation(
   throwIfError(error);
   return (data ?? []).length > 0;
 }
+
+const HISTORY_LIMIT = 24;
+
+/** Latest successful observations. Failures and incomplete claims are not market state. */
+export async function readSucceededObservations(
+  limit = HISTORY_LIMIT,
+): Promise<ObservationRow[]> {
+  const { data, error } = await supabaseAdmin()
+    .from("market_observations")
+    .select(
+      "slot_start, cadence_seconds, outcome, attempted_at, completed_at, levels, min_buy_credit_atoms, reported_total_credit_atoms, fingerprint, http_status, error_detail",
+    )
+    .eq("outcome", "succeeded")
+    .order("slot_start", { ascending: false })
+    .limit(limit);
+  throwIfError(error);
+  return ((data ?? []) as ObservationRow[]).filter(
+    (row) => row.outcome === "succeeded",
+  );
+}

@@ -42,6 +42,7 @@ import {
 import { classifyTxError } from "../lib/ora/tx-error";
 import { useWallet } from "../lib/wallet/wallet";
 import { walletSearchParam } from "../lib/ora/wallet";
+import type { ObservationHistoryItem } from "../lib/ora/observation-history";
 
 type AppState =
   | "wallet_disconnected"
@@ -93,6 +94,9 @@ export function OraDeskPage() {
     "idle",
   );
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [observations, setObservations] = useState<ObservationHistoryItem[]>([]);
+  const [observationsLoading, setObservationsLoading] = useState(true);
+  const [observationError, setObservationError] = useState<string | null>(null);
   const [committed, setCommitted] = useState<UserSettings | null>(null);
   const saveResetRef = useRef<number | null>(null);
   const lastPersistedKey = useRef<string | null>(null);
@@ -230,6 +234,36 @@ export function OraDeskPage() {
     void loadMarket();
     void loadRest();
   }, [loadMarket, loadRest]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setObservationsLoading(true);
+    setObservationError(null);
+    void fetch("/api/observations", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error ?? "Market history unavailable");
+        }
+        if (!cancelled) {
+          setObservations(
+            Array.isArray(data.observations) ? data.observations : [],
+          );
+        }
+      })
+      .catch((err: Error) => {
+        if (!cancelled) {
+          setObservationError(err.message);
+          setObservations([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setObservationsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -846,6 +880,18 @@ export function OraDeskPage() {
   const decisionWhy = decision?.reason ?? null;
   const meetsThreshold =
     minDiscount != null && market != null && market.bestDiscount >= minDiscount;
+  const observationCount = observations.length;
+  const latestObservation = observations[0] ?? null;
+  const highestObservedDiscount = observations.reduce<number | null>(
+    (highest, item) => {
+      if (item.bestDiscountPercent == null) return highest;
+      if (highest == null) return item.bestDiscountPercent;
+      return item.bestDiscountPercent > highest
+        ? item.bestDiscountPercent
+        : highest;
+    },
+    null,
+  );
 
   return (
     <main className="desk">
@@ -1130,6 +1176,91 @@ export function OraDeskPage() {
               </div>
             )}
           </div>
+        )}
+      </section>
+
+      <section className="panel market-history-panel" id="market-history">
+        <h2>Market History</h2>
+        <p className="status history-intro">
+          Historical CREDIT book snapshots from scheduled observation. This is
+          not live market data.
+        </p>
+        {observationsLoading && (
+          <p className="status is-loading">Loading market history…</p>
+        )}
+        {observationError && <p className="error">{observationError}</p>}
+        {!observationsLoading && !observationError && observationCount === 0 && (
+          <div className="history-empty">
+            <h3 className="history-empty-title">No observations yet</h3>
+            <p className="status">
+              Ora hasn&apos;t recorded a successful CREDIT book snapshot yet.
+            </p>
+          </div>
+        )}
+        {!observationsLoading && !observationError && observationCount > 0 && (
+          <>
+            <p className="market-history-summary">
+              <span>
+                {observationCount} observation{observationCount === 1 ? "" : "s"}
+              </span>
+              {latestObservation && (
+                <>
+                  <span className="market-history-sep" aria-hidden="true">
+                    ·
+                  </span>
+                  <span>
+                    Latest {formatTime(latestObservation.slotStart, true)}
+                  </span>
+                </>
+              )}
+              {highestObservedDiscount != null && (
+                <>
+                  <span className="market-history-sep" aria-hidden="true">
+                    ·
+                  </span>
+                  <span>
+                    Highest discount {highestObservedDiscount}%
+                  </span>
+                </>
+              )}
+            </p>
+            <div className="table-wrap">
+              <table className="history">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Best discount</th>
+                    <th>CREDIT at that discount</th>
+                    <th>Total available CREDIT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {observations.map((item) => {
+                    const emptyBook = item.bestDiscountPercent == null;
+                    return (
+                      <tr
+                        className="history-row market-history-row"
+                        key={item.slotStart}
+                      >
+                        <td>{formatTime(item.slotStart, true)}</td>
+                        <td className="mono">
+                          {emptyBook ? "—" : `${item.bestDiscountPercent}%`}
+                        </td>
+                        <td className="mono">
+                          {emptyBook
+                            ? "—"
+                            : formatCredit(item.availableAtBestDiscount ?? 0)}
+                        </td>
+                        <td className="mono">
+                          {formatCredit(item.totalAvailableCredit)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
 

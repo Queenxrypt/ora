@@ -22,7 +22,8 @@
     "test:confirm": "tsx lib/orbio/confirm.check.ts",
     "test:integrity": "tsx lib/orbio/execution-integrity.check.ts",
     "test:wallet": "tsx lib/wallet/connection.check.ts",
-    "test:observation": "tsx lib/orbio/book-observation.check.ts"
+    "test:observation": "tsx lib/orbio/book-observation.check.ts",
+    "test:observation-history": "tsx lib/ora/observation-history.check.ts"
   },
   "dependencies": {
     "@openrouter/sdk": "^1.3.1",
