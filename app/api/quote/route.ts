@@ -8,6 +8,7 @@ import {
   type AmountRejection,
 } from "../../../lib/ora/quote-amount";
 import { quoteMeetsMinDiscount } from "../../../lib/ora/quote-rule";
+import { paramsForTargetLinkedDecision } from "../../../lib/ora/target";
 import {
   readSettings,
   requireOwnedDecision,
@@ -58,9 +59,20 @@ export async function POST(request: Request) {
     if (!recorded.ok) return amountResponse(recorded);
 
     const settings = await readSettings(wallet);
+    const frozen = paramsForTargetLinkedDecision(access.record);
+    if (access.record.targetId && frozen == null) {
+      return NextResponse.json(
+        {
+          error: "This target purchase is missing frozen procurement parameters.",
+          code: "frozen_params",
+        },
+        { status: 409 },
+      );
+    }
+    const params = frozen ?? settings;
     const market = await readMarketSnapshot();
 
-    const liveDecision = decide(market, settings);
+    const liveDecision = decide(market, params);
     if (liveDecision.action !== "BUY") {
       await updateOwnedDecision(body.decisionId, wallet, {
         executionStatus: "stale_quote",
@@ -94,13 +106,13 @@ export async function POST(request: Request) {
       );
     }
 
-    if (quote.totalUsdg > settings.spendingLimitUsdg) {
+    if (quote.totalUsdg > params.spendingLimitUsdg) {
       return NextResponse.json(
         {
           error: "Quoted cost exceeds Ora spending limit.",
           code: "limit",
           quote,
-          spendingLimitUsdg: settings.spendingLimitUsdg,
+          spendingLimitUsdg: params.spendingLimitUsdg,
         },
         { status: 409 },
       );
@@ -113,21 +125,21 @@ export async function POST(request: Request) {
       totalAvailableCredit: market.totalAvailableCredit,
     };
 
-    if (!quoteMeetsMinDiscount(quote.discountPercent, settings.minDiscountPercent)) {
+    if (!quoteMeetsMinDiscount(quote.discountPercent, params.minDiscountPercent)) {
       await updateOwnedDecision(body.decisionId, wallet, {
         executionStatus: "review",
         quotePrice: quote.quotePrice,
         quotedUsdg: quote.totalUsdg,
         quotedAt: quote.quotedAt,
-        blockedReason: `Executable quote is ${quote.discountPercent}%, below the ${settings.minDiscountPercent}% minimum. Book discount is not the fill price.`,
+        blockedReason: `Executable quote is ${quote.discountPercent}%, below the ${params.minDiscountPercent}% minimum. Book discount is not the fill price.`,
       });
       return NextResponse.json(
         {
-          error: `The executable quote is ${quote.discountPercent}% per CREDIT, below your ${settings.minDiscountPercent}% minimum. The CREDIT book (${market.bestDiscount}%) is not the fill price. Purchase is not offered.`,
+          error: `The executable quote is ${quote.discountPercent}% per CREDIT, below your ${params.minDiscountPercent}% minimum. The CREDIT book (${market.bestDiscount}%) is not the fill price. Purchase is not offered.`,
           code: "quote_below_threshold",
           quote,
-          spendingLimitUsdg: settings.spendingLimitUsdg,
-          minDiscountPercent: settings.minDiscountPercent,
+          spendingLimitUsdg: params.spendingLimitUsdg,
+          minDiscountPercent: params.minDiscountPercent,
           market: marketPayload,
         },
         { status: 409 },
@@ -144,8 +156,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       quote,
-      spendingLimitUsdg: settings.spendingLimitUsdg,
-      minDiscountPercent: settings.minDiscountPercent,
+      spendingLimitUsdg: params.spendingLimitUsdg,
+      minDiscountPercent: params.minDiscountPercent,
       market: marketPayload,
     });
   } catch (error) {

@@ -181,11 +181,11 @@ if (quoteSource.includes("settings.requestedCredit")) {
 // H. The spending limit is checked against the authoritative quote total.
 inOrder(quoteSource, "H", [
   "quoteForCredit(requestedCredit)",
-  "quote.totalUsdg > settings.spendingLimitUsdg",
+  "quote.totalUsdg > params.spendingLimitUsdg",
 ]);
 inOrder(validateSource, "H", [
   "quoteForCredit(requestedCredit)",
-  "fresh.totalUsdg > settings.spendingLimitUsdg",
+  "fresh.totalUsdg > params.spendingLimitUsdg",
 ]);
 
 // I. The executable discount is still checked.
@@ -194,11 +194,11 @@ if (quoteMeetsMinDiscount(23.5, 24) || !quoteMeetsMinDiscount(23.5, 20)) {
 }
 inOrder(quoteSource, "I", [
   "quoteForCredit(requestedCredit)",
-  "quoteMeetsMinDiscount(quote.discountPercent, settings.minDiscountPercent)",
+  "quoteMeetsMinDiscount(quote.discountPercent, params.minDiscountPercent)",
 ]);
 inOrder(validateSource, "I", [
   "quoteForCredit(requestedCredit)",
-  "quoteMeetsMinDiscount(fresh.discountPercent, settings.minDiscountPercent)",
+  "quoteMeetsMinDiscount(fresh.discountPercent, params.minDiscountPercent)",
   "quotesMatch(body.quote, fresh)",
 ]);
 
@@ -210,7 +210,7 @@ if (validateSource.includes("requestedAmount: body.quote")) {
   throw new Error("J: validation must not rewrite the decision amount");
 }
 inOrder(validateSource, "J", [
-  "decide(market, settings)",
+  "decide(market, params)",
   "checkAmountAgainstMarket(",
   "quoteForCredit(requestedCredit)",
 ]);

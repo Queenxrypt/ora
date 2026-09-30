@@ -117,6 +117,31 @@ export type DecisionRecord = {
    * BUY stores that size as requestedAmount. Absent on older rows.
    */
   evaluatedRequestedCredit?: number;
+  /** Set when this decision was created from a procurement target. */
+  targetId?: string;
+};
+
+export type TargetStatus = "WATCHING" | "READY" | "FULFILLED" | "CANCELLED";
+
+export type ProcurementTarget = {
+  id: string;
+  walletAddress: `0x${string}`;
+  requestedCredit: number;
+  minDiscountPercent: number;
+  maxSpendUsdg: number;
+  status: TargetStatus;
+  createdAt: string;
+  updatedAt: string;
+  cancelledAt?: string;
+  fulfilledAt?: string;
+  activeDecisionId?: string;
+  fulfilledDecisionId?: string;
+  lastEvaluatedAt?: string;
+  lastEvaluationAction?: DecisionAction;
+  lastEvaluationReason?: string;
+  lastRequestedAmount?: number;
+  lastExecutableDiscountPercent?: number;
+  lastExecutableTotalUsdg?: number;
 };
 
 export type OutcomePhase = "decision" | "execution" | "confirmed" | "outcome";

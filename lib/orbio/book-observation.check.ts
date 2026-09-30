@@ -308,6 +308,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       return json(matched.map((row) => ({ slot_start: row.slot_start })));
     }
   }
+  if (url.host === "supabase.test" && url.pathname === "/rest/v1/procurement_targets") {
+    if (method === "GET") return json([]);
+  }
   throw new Error(`fake fetch: unexpected ${method} ${url.href}`);
 }) as typeof fetch;
 

@@ -1543,7 +1543,8 @@ a.btn:hover {
 .history-panel,
 .market-history-panel,
 .performance-panel,
-.panel-execution {
+.panel-execution,
+.target-panel {
   transition: border-color 0.2s var(--ease);
 }
 
@@ -1643,6 +1644,7 @@ a.btn:hover {
 
 .settings-panel h2,
 #recent h2,
+#targets h2,
 .settings-group legend {
   color: #3b0a12;
 }
@@ -1682,6 +1684,19 @@ a.btn:hover {
 .settings-panel > .settings-constraint {
   margin: 12px 0 0;
   max-width: 38rem;
+}
+
+.target-body {
+  margin: 0 0 8px;
+}
+
+.target-actions {
+  justify-content: flex-start;
+  margin: 14px 0 4px;
+}
+
+.target-body .procurement-check {
+  margin-top: 12px;
 }
 
 .fields {

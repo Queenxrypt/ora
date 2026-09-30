@@ -44,6 +44,17 @@ if (!row.reasoning || row.reasoning.recommendation !== "WAIT") {
 if (row.min_discount_percent !== 20) {
   throw new Error("min_discount_percent must persist");
 }
+if (row.target_id != null) {
+  throw new Error("target_id is absent unless the decision came from a target");
+}
+
+const targeted = recordToRow({ ...sample, targetId: "tgt-1" });
+if (targeted.target_id !== "tgt-1") {
+  throw new Error("target_id must persist");
+}
+if (rowToRecord(targeted).targetId !== "tgt-1") {
+  throw new Error("targetId must round-trip");
+}
 
 const back = rowToRecord(row);
 if (back.decision !== "BUY" || back.walletAddress !== sample.walletAddress) {
@@ -79,6 +90,9 @@ const criteriaLocked = patchToRow({
 });
 if ("min_discount_percent" in criteriaLocked || "evaluated_requested_credit" in criteriaLocked) {
   throw new Error("Execution patches must not rewrite decision criteria");
+}
+if ("target_id" in patchToRow({ targetId: "tgt-other" })) {
+  throw new Error("Execution patches must not retarget a decision");
 }
 
 console.log("store row mapping ok");

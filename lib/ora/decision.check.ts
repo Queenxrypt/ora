@@ -206,13 +206,13 @@ const validateSource = readFileSync(
   new URL("../../app/api/execute/validate/route.ts", import.meta.url),
   "utf8",
 );
-const validateDecide = validateSource.indexOf("decide(market, settings)");
+const validateDecide = validateSource.indexOf("decide(market, params)");
 const validateQuote = validateSource.indexOf("quoteForCredit(requestedCredit)");
 const validateLimit = validateSource.indexOf(
-  "fresh.totalUsdg > settings.spendingLimitUsdg",
+  "fresh.totalUsdg > params.spendingLimitUsdg",
 );
 const validateDiscount = validateSource.indexOf(
-  "quoteMeetsMinDiscount(fresh.discountPercent, settings.minDiscountPercent)",
+  "quoteMeetsMinDiscount(fresh.discountPercent, params.minDiscountPercent)",
 );
 const validateMoved = validateSource.indexOf("quotesMatch(body.quote, fresh)");
 if (

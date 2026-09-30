@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { updateOwnedDecision } from "../../../../lib/db/store";
+import { tryReopenTargetFromDecision } from "../../../../lib/db/targets";
 import {
   decisionAccessResponse,
   missingWalletResponse,
@@ -25,6 +26,7 @@ export async function POST(request: Request) {
       blockedReason: body.reason ?? "Transaction rejected or failed.",
     });
     if ("error" in result) return decisionAccessResponse(result.error);
+    await tryReopenTargetFromDecision(result.record);
 
     return NextResponse.json({ record: result.record });
   } catch (error) {

@@ -12,6 +12,10 @@ import {
   updateOwnedDecision,
 } from "../../../../lib/db/store";
 import {
+  tryFulfillTargetFromDecision,
+  tryReopenTargetFromDecision,
+} from "../../../../lib/db/targets";
+import {
   decisionAccessResponse,
   missingWalletResponse,
   walletFromBody,
@@ -122,6 +126,7 @@ export async function POST(request: Request) {
         blockedReason: verified.error,
       });
       if ("error" in failed) return decisionAccessResponse(failed.error);
+      await tryReopenTargetFromDecision(failed.record);
       return NextResponse.json(
         {
           error: "Transaction is not a buyAndActivate purchase on the Orbio exchange.",
@@ -171,6 +176,7 @@ export async function POST(request: Request) {
         blockedReason: "Transaction reverted or failed.",
       });
       if ("error" in failed) return decisionAccessResponse(failed.error);
+      await tryReopenTargetFromDecision(failed.record);
       return NextResponse.json(
         {
           error: "Transaction failed.",
@@ -190,6 +196,7 @@ export async function POST(request: Request) {
           blockedReason: derived.error,
         });
         if ("error" in failed) return decisionAccessResponse(failed.error);
+        await tryReopenTargetFromDecision(failed.record);
       }
       return NextResponse.json(
         { error: derived.error, code: derived.code },
@@ -210,6 +217,7 @@ export async function POST(request: Request) {
       if (record.error === "confirmed") {
         const latest = await requireOwnedDecision(body.decisionId, wallet);
         if ("record" in latest && latest.record.txHash?.toLowerCase() === txHash) {
+          await tryFulfillTargetFromDecision(latest.record);
           return NextResponse.json({
             txHash,
             status: "success",
@@ -219,6 +227,8 @@ export async function POST(request: Request) {
       }
       return decisionAccessResponse(record.error);
     }
+
+    await tryFulfillTargetFromDecision(record.record);
 
     return NextResponse.json({
       txHash,

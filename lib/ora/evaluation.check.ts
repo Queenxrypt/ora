@@ -518,4 +518,45 @@ if (
   throw new Error("J: reasoning must not override the corrected BUY");
 }
 
+const targetBuy: DecisionRecord = {
+  ...recordFor(buy, buyBook),
+  id: "dec-target",
+  targetId: "tgt-1",
+  requestedAmount: 50,
+  minDiscountPercent: 20,
+  evaluatedSpendingLimitUsdg: 40,
+  executable: {
+    totalUsdg: 37.5,
+    discountPercent: 25,
+    creditOut: 50,
+    requestedCredit: 50,
+  },
+};
+const duringTargetReview = nextEvaluationAction({
+  wallet,
+  market: buyBook,
+  params: saved,
+  lastKey: null,
+  inFlightKey: null,
+  latest: targetBuy,
+});
+if (duringTargetReview.type !== "skip" || duringTargetReview.reason !== "target-purchase") {
+  throw new Error("an in-flight target purchase must not be replaced by a settings evaluation");
+}
+const afterTargetFailed: DecisionRecord = {
+  ...targetBuy,
+  executionStatus: "failed",
+};
+const afterTargetFailure = nextEvaluationAction({
+  wallet,
+  market: buyBook,
+  params: saved,
+  lastKey: null,
+  inFlightKey: null,
+  latest: afterTargetFailed,
+});
+if (afterTargetFailure.type !== "persist") {
+  throw new Error("a failed target purchase must allow settings evaluation again");
+}
+
 console.log("evaluation persistence ok");

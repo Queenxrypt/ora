@@ -70,5 +70,19 @@ export async function GET(request: Request) {
     return respond({ error: "Market observation could not be recorded.", slotStart }, 500);
   }
 
+  if (result.outcome === "succeeded") {
+    try {
+      const { evaluateOpenTargetsAfterObservation } = await import(
+        "../../../lib/ora/watch-targets"
+      );
+      await evaluateOpenTargetsAfterObservation(result.book);
+    } catch (error) {
+      console.error(
+        "Procurement target evaluation after observation failed:",
+        message(error),
+      );
+    }
+  }
+
   return respond({ slotStart, outcome: result.outcome });
 }

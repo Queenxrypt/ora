@@ -117,6 +117,7 @@ void currentSettings;
 assert(value(historyDetail(waitRecord).criteria, "Minimum discount") === "20%", "old record keeps its own minimum");
 assert(!("min_discount_percent" in patchToRow({ minDiscountPercent: 5 })), "criteria cannot be patched later");
 assert(!("evaluated_requested_credit" in patchToRow({ evaluatedRequestedCredit: 50 })), "evaluated CREDIT cannot be patched later");
+assert(!("target_id" in patchToRow({ targetId: "tgt-x" })), "target link cannot be patched later");
 
 // BUY before execution.
 const buy = decideWithExecutableQuote(bookAt(25), DEFAULT_PARAMS, {

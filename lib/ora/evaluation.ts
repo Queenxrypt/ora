@@ -115,7 +115,8 @@ export function nextEvaluationAction(input: {
         | "duplicate"
         | "in-flight"
         | "terminal"
-        | "closed";
+        | "closed"
+        | "target-purchase";
     } {
   if (!input.wallet) return { type: "skip", reason: "disconnected" };
   if (!input.market || !input.params) {
@@ -127,6 +128,9 @@ export function nextEvaluationAction(input: {
   const key = evaluationKey(input.wallet, input.market, input.params);
   if (key === input.lastKey) return { type: "skip", reason: "duplicate" };
   if (key === input.inFlightKey) return { type: "skip", reason: "in-flight" };
+  if (input.latest?.targetId && canReviewDecision(input.latest)) {
+    return { type: "skip", reason: "target-purchase" };
+  }
   const latestWallet = input.latest?.walletAddress?.toLowerCase();
   if (
     input.lastKey === null &&

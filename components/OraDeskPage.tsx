@@ -7,6 +7,7 @@ import type {
   MarketSnapshot,
   OraDecision,
   OraReasoning,
+  ProcurementTarget,
   UserSettings,
 } from "../types/ora";
 import {
@@ -43,6 +44,7 @@ import { classifyTxError } from "../lib/ora/tx-error";
 import { useWallet } from "../lib/wallet/wallet";
 import { walletSearchParam } from "../lib/ora/wallet";
 import type { ObservationHistoryItem } from "../lib/ora/observation-history";
+import { ProcurementTargetPanel } from "./ProcurementTargetPanel";
 
 type AppState =
   | "wallet_disconnected"
@@ -98,6 +100,9 @@ export function OraDeskPage() {
   const [observationsLoading, setObservationsLoading] = useState(true);
   const [observationError, setObservationError] = useState<string | null>(null);
   const [committed, setCommitted] = useState<UserSettings | null>(null);
+  const [target, setTarget] = useState<ProcurementTarget | null>(null);
+  const [targetError, setTargetError] = useState<string | null>(null);
+  const [targetBusy, setTargetBusy] = useState(false);
   const saveResetRef = useRef<number | null>(null);
   const lastPersistedKey = useRef<string | null>(null);
   const inFlightKey = useRef<string | null>(null);
@@ -210,17 +215,20 @@ export function OraDeskPage() {
   const loadRest = useCallback(async () => {
     const wallet = address;
     const query = walletSearchParam(wallet);
-    const [settingsRes, ledgerRes] = await Promise.all([
+    const [settingsRes, ledgerRes, targetRes] = await Promise.all([
       fetch(`/api/settings${query}`, { cache: "no-store" }),
       fetch(`/api/ledger${query}`, { cache: "no-store" }),
+      fetch(`/api/targets${query}`, { cache: "no-store" }),
     ]);
     if (addressRef.current !== wallet) return;
     const settingsJson = await settingsRes.json();
     const ledgerJson = await ledgerRes.json();
+    const targetJson = await targetRes.json();
     if (!wallet) {
       setSettings(settingsJson.settings ?? null);
       setCommitted(null);
       setHistory(ledgerJson.decisions ?? []);
+      setTarget(null);
       return;
     }
     const loaded = settingsJson.settings as UserSettings | undefined;
@@ -228,7 +236,31 @@ export function OraDeskPage() {
     setSettings(loaded);
     setCommitted(loaded);
     setHistory(ledgerJson.decisions ?? []);
+    setTarget(targetJson.target ?? null);
   }, [address]);
+
+  useEffect(() => {
+    const wallet = address;
+    if (!wallet || !market || !target) return;
+    if (target.status !== "WATCHING" && target.status !== "READY") return;
+    let cancelled = false;
+    void fetch("/api/targets/evaluate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetId: target.id, walletAddress: wallet }),
+    })
+      .then(async (response) => {
+        const data = await response.json();
+        if (cancelled) return;
+        if (data.target) setTarget(data.target as ProcurementTarget);
+      })
+      .catch(() => {
+        /* Keep the last loaded target if evaluation is unavailable. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [address, market, target?.id]);
 
   useEffect(() => {
     void loadMarket();
@@ -317,6 +349,131 @@ export function OraDeskPage() {
     }
   }
 
+  async function createTarget(draft: {
+    requestedCredit: number;
+    minDiscountPercent: number;
+    maxSpendUsdg: number;
+  }) {
+    if (!address) return;
+    setTargetError(null);
+    setTargetBusy(true);
+    try {
+      const response = await fetch("/api/targets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...draft, walletAddress: address }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not set target.");
+      }
+      setTarget(data.target as ProcurementTarget);
+    } catch (err) {
+      setTargetError(err instanceof Error ? err.message : "Could not set target.");
+    } finally {
+      setTargetBusy(false);
+    }
+  }
+
+  async function cancelTarget() {
+    if (!address || !target) return;
+    setTargetError(null);
+    setTargetBusy(true);
+    try {
+      const response = await fetch("/api/targets/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetId: target.id, walletAddress: address }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not cancel target.");
+      }
+      await loadRest();
+    } catch (err) {
+      setTargetError(
+        err instanceof Error ? err.message : "Could not cancel target.",
+      );
+    } finally {
+      setTargetBusy(false);
+    }
+  }
+
+  async function reviewTargetPurchase() {
+    if (!address || !target) return;
+    setTargetError(null);
+    setError(null);
+    setTargetBusy(true);
+    setProgress("Checking the live market");
+    setTimeout(() => scrollToReview(), 0);
+    try {
+      const review = await fetch("/api/targets/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetId: target.id, walletAddress: address }),
+      });
+      const reviewData = await review.json();
+      if (reviewData.target) setTarget(reviewData.target as ProcurementTarget);
+      if (!review.ok) {
+        setProgress("");
+        setTargetError(
+          reviewData.error ?? "The CREDIT market no longer qualifies.",
+        );
+        setUi("wait");
+        return;
+      }
+      const persisted = reviewData.record as DecisionRecord;
+      const nextDecision = reviewData.decision as OraDecision;
+      rememberRecord(persisted);
+      setRecorded(nextDecision);
+      setProgress("Getting executable quote");
+      const response = await fetch("/api/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decisionId: persisted.id,
+          walletAddress: address,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (data.code === "quote_below_threshold" && data.quote) {
+          setQuote(data.quote);
+          setQuoteBook(data.market ?? null);
+          setError(
+            data.error ?? "Executable quote is below the minimum discount.",
+          );
+          setProgress("");
+          setUi("review");
+          await loadRest();
+          scrollToReview();
+          return;
+        }
+        setError(data.error ?? "Quote failed");
+        setProgress("");
+        setQuote(null);
+        setQuoteBook(null);
+        setUi("failed");
+        await loadRest();
+        scrollToReview();
+        return;
+      }
+      setQuote(data.quote);
+      setQuoteBook(data.market ?? null);
+      setProgress("");
+      setUi("review");
+      await loadRest();
+      scrollToReview();
+    } catch (err) {
+      setProgress("");
+      setTargetError(
+        err instanceof Error ? err.message : "Could not review this target.",
+      );
+    } finally {
+      setTargetBusy(false);
+    }
+  }
+
   function rememberRecord(next: DecisionRecord | null) {
     recordRef.current = next;
     setRecord(next);
@@ -341,6 +498,10 @@ export function OraDeskPage() {
     const wallet = addressRef.current;
     setError(null);
     if (!wallet) return null;
+    const openTarget = recordRef.current;
+    if (openTarget?.targetId && canReviewDecision(openTarget)) {
+      return openTarget;
+    }
     setUi("decision_loading");
     const response = await fetch("/api/decision", {
       method: "POST",
@@ -355,6 +516,14 @@ export function OraDeskPage() {
     }
     if (addressRef.current !== wallet) return null;
     const ledger = data.record as DecisionRecord;
+    const inReview = recordRef.current;
+    if (
+      inReview?.targetId &&
+      canReviewDecision(inReview) &&
+      inReview.id !== ledger.id
+    ) {
+      return inReview;
+    }
     const nextReasoning =
       ledger.reasoning ?? (data.reasoning as OraReasoning | null) ?? null;
     applyRecordedDecision(
@@ -580,6 +749,13 @@ export function OraDeskPage() {
     await loadRest();
   }
 
+  const reviewMinDiscount = record?.targetId
+    ? (record.minDiscountPercent ?? 0)
+    : (settings?.minDiscountPercent ?? 0);
+  const reviewSpendLimit = record?.targetId
+    ? record.evaluatedSpendingLimitUsdg
+    : settings?.spendingLimitUsdg;
+
   async function confirmPurchase() {
     setError(null);
     if (!quote) {
@@ -600,13 +776,13 @@ export function OraDeskPage() {
       );
       return;
     }
-    if (!quoteMeetsMinDiscount(quote.discountPercent, settings?.minDiscountPercent ?? 0)) {
+    if (!quoteMeetsMinDiscount(quote.discountPercent, reviewMinDiscount)) {
       setError(
-        `Executable quote is ${quote.discountPercent}%, below your ${settings?.minDiscountPercent}% minimum. No transaction was sent.`,
+        `Executable quote is ${quote.discountPercent}%, below your ${reviewMinDiscount}% minimum. No transaction was sent.`,
       );
       return;
     }
-    if (settings && quote.totalUsdg > settings.spendingLimitUsdg) {
+    if (reviewSpendLimit != null && quote.totalUsdg > reviewSpendLimit) {
       setError("Quoted cost exceeds Ora spending limit. No transaction was sent.");
       return;
     }
@@ -823,8 +999,7 @@ export function OraDeskPage() {
     market?.bestDiscount;
   const quoteMeetsRule =
     Boolean(quote) &&
-    settings != null &&
-    quoteMeetsMinDiscount(quote!.discountPercent, settings.minDiscountPercent);
+    quoteMeetsMinDiscount(quote!.discountPercent, reviewMinDiscount);
   const insufficientUsdg =
     isConnected &&
     quote != null &&
@@ -1179,6 +1354,30 @@ export function OraDeskPage() {
         )}
       </section>
 
+      <ProcurementTargetPanel
+        connected={isConnected}
+        settings={settings}
+        market={market}
+        target={target}
+        error={targetError}
+        busy={targetBusy}
+        fulfilledCredit={
+          target?.fulfilledDecisionId
+            ? history.find((item) => item.id === target.fulfilledDecisionId)
+                ?.creditAcquired
+            : undefined
+        }
+        fulfilledUsdg={
+          target?.fulfilledDecisionId
+            ? history.find((item) => item.id === target.fulfilledDecisionId)
+                ?.totalUsdgPaid
+            : undefined
+        }
+        onCreate={createTarget}
+        onCancel={cancelTarget}
+        onReview={reviewTargetPurchase}
+      />
+
       <section className="panel settings-panel" id="settings">
         <h2>Procurement settings</h2>
         {!isConnected && (
@@ -1401,7 +1600,7 @@ export function OraDeskPage() {
                 </div>
                 <div className="row">
                   <span className="label">Your minimum discount</span>
-                  <span className="value">{settings?.minDiscountPercent}%</span>
+                  <span className="value">{reviewMinDiscount}%</span>
                 </div>
               </div>
               <div className="review-block">
@@ -1504,7 +1703,7 @@ export function OraDeskPage() {
                 {quote && !quoteMeetsRule && (
                   <p className="error">
                     Confirm purchase is unavailable because the executable quote
-                    does not meet your {settings?.minDiscountPercent}% minimum.
+                    does not meet your {reviewMinDiscount}% minimum.
                   </p>
                 )}
                 {insufficientUsdg && (
@@ -1553,7 +1752,7 @@ export function OraDeskPage() {
                 </div>
                 <div className="row">
                   <span className="label">Spending limit</span>
-                  <span className="value">{settings?.spendingLimitUsdg} USDG</span>
+                  <span className="value">{reviewSpendLimit ?? "—"} USDG</span>
                 </div>
                 <div className="row">
                   <span className="label">Exchange</span>

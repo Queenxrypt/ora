@@ -7,6 +7,7 @@ import {
   recordedQuoteAmount,
 } from "../../../../lib/ora/quote-amount";
 import { quoteMeetsMinDiscount } from "../../../../lib/ora/quote-rule";
+import { paramsForTargetLinkedDecision } from "../../../../lib/ora/target";
 import {
   readSettings,
   requireOwnedDecision,
@@ -84,6 +85,17 @@ export async function POST(request: Request) {
     }
 
     const settings = await readSettings(wallet);
+    const frozen = paramsForTargetLinkedDecision(current);
+    if (current.targetId && frozen == null) {
+      return NextResponse.json(
+        {
+          error: "This target purchase is missing frozen procurement parameters.",
+          code: "frozen_params",
+        },
+        { status: 409 },
+      );
+    }
+    const params = frozen ?? settings;
     const market = await readMarketSnapshot();
 
     if (recorded.requestedCredit < market.minBuyCredit) {
@@ -114,7 +126,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const liveDecision = decide(market, settings);
+    const liveDecision = decide(market, params);
     if (liveDecision.action !== "BUY") {
       await updateOwnedDecision(body.decisionId, wallet, {
         executionStatus: "stale_quote",
@@ -157,7 +169,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (fresh.totalUsdg > settings.spendingLimitUsdg) {
+    if (fresh.totalUsdg > params.spendingLimitUsdg) {
       await updateOwnedDecision(body.decisionId, wallet, {
         executionStatus: "blocked_limit",
         blockedReason: "Spending limit exceeded on revalidation.",
@@ -172,17 +184,17 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!quoteMeetsMinDiscount(fresh.discountPercent, settings.minDiscountPercent)) {
+    if (!quoteMeetsMinDiscount(fresh.discountPercent, params.minDiscountPercent)) {
       await updateOwnedDecision(body.decisionId, wallet, {
         executionStatus: "review",
         quotePrice: fresh.quotePrice,
         quotedUsdg: fresh.totalUsdg,
         quotedAt: fresh.quotedAt,
-        blockedReason: `Executable quote is ${fresh.discountPercent}%, below the ${settings.minDiscountPercent}% minimum.`,
+        blockedReason: `Executable quote is ${fresh.discountPercent}%, below the ${params.minDiscountPercent}% minimum.`,
       });
       return NextResponse.json(
         {
-          error: `The executable quote is ${fresh.discountPercent}% per CREDIT, below your ${settings.minDiscountPercent}% minimum. The CREDIT book is not the fill price. Purchase is not offered.`,
+          error: `The executable quote is ${fresh.discountPercent}% per CREDIT, below your ${params.minDiscountPercent}% minimum. The CREDIT book is not the fill price. Purchase is not offered.`,
           code: "quote_below_threshold",
           quote: fresh,
         },
@@ -228,7 +240,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       quote: fresh,
-      spendingLimitUsdg: settings.spendingLimitUsdg,
+      spendingLimitUsdg: params.spendingLimitUsdg,
     });
   } catch (error) {
     const message =
