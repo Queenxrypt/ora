@@ -9,7 +9,7 @@ import { normalizeWalletAddress } from "../ora/wallet";
 import {
   evaluationWrite,
   isOpenTargetStatus,
-  type TargetEvaluation,
+  type ConclusiveTargetEvaluation,
   type TargetParams,
 } from "../ora/target";
 import { supabaseAdmin } from "./supabase";
@@ -223,7 +223,10 @@ export async function requireOwnedTarget(
   return { target };
 }
 
-function evaluationRowPatch(evaluation: TargetEvaluation, now = new Date()) {
+function evaluationRowPatch(
+  evaluation: ConclusiveTargetEvaluation,
+  now = new Date(),
+) {
   const write = evaluationWrite(evaluation, now);
   return {
     status: write.status,
@@ -237,18 +240,23 @@ function evaluationRowPatch(evaluation: TargetEvaluation, now = new Date()) {
   };
 }
 
+/**
+ * Writes an evaluation only if the row is unchanged since `evaluated` was read.
+ * Every target write sets updated_at, so a newer evaluation, review link,
+ * reopen, cancel or fulfilment makes this a no-op that returns null.
+ */
 export async function persistTargetEvaluation(
-  id: string,
-  walletAddress: string,
-  evaluation: TargetEvaluation,
+  evaluated: Pick<ProcurementTarget, "id" | "walletAddress" | "updatedAt">,
+  evaluation: ConclusiveTargetEvaluation,
 ): Promise<ProcurementTarget | null> {
-  const wallet = normalizeWalletAddress(walletAddress);
+  const wallet = normalizeWalletAddress(evaluated.walletAddress);
   if (!wallet) return null;
   const { data, error } = await supabaseAdmin()
     .from("procurement_targets")
     .update(evaluationRowPatch(evaluation))
-    .eq("id", id)
+    .eq("id", evaluated.id)
     .eq("wallet_address", wallet)
+    .eq("updated_at", evaluated.updatedAt)
     .in("status", ["WATCHING", "READY"])
     .select(TARGET_COLUMNS)
     .maybeSingle();

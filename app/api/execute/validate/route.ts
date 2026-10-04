@@ -7,12 +7,17 @@ import {
   recordedQuoteAmount,
 } from "../../../../lib/ora/quote-amount";
 import { quoteMeetsMinDiscount } from "../../../../lib/ora/quote-rule";
-import { paramsForTargetLinkedDecision } from "../../../../lib/ora/target";
+import {
+  fillsRequestedCredit,
+  isOpenTargetStatus,
+  paramsForTargetLinkedDecision,
+} from "../../../../lib/ora/target";
 import {
   readSettings,
   requireOwnedDecision,
   updateOwnedDecision,
 } from "../../../../lib/db/store";
+import { requireOwnedTarget } from "../../../../lib/db/targets";
 import { readMarketSnapshot } from "../../../../lib/orbio/market";
 import type { ExecutableQuote } from "../../../../types/ora";
 import {
@@ -95,6 +100,22 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+    if (current.targetId) {
+      const linked = await requireOwnedTarget(current.targetId, wallet);
+      if (
+        "error" in linked ||
+        !isOpenTargetStatus(linked.target.status) ||
+        linked.target.activeDecisionId !== current.id
+      ) {
+        return NextResponse.json(
+          {
+            error: "This is no longer the active purchase for its target. Review the target again.",
+            code: "target_superseded",
+          },
+          { status: 409 },
+        );
+      }
+    }
     const params = frozen ?? settings;
     const market = await readMarketSnapshot();
 
@@ -165,6 +186,20 @@ export async function POST(request: Request) {
       });
       return NextResponse.json(
         { error: "Insufficient liquidity.", code: "liquidity" },
+        { status: 409 },
+      );
+    }
+
+    if (frozen && !fillsRequestedCredit(fresh.creditOut, requestedCredit)) {
+      await updateOwnedDecision(body.decisionId, wallet, {
+        executionStatus: "blocked_liquidity",
+        blockedReason: "Executable quote cannot fill the full target amount on revalidation.",
+      });
+      return NextResponse.json(
+        {
+          error: "The executable quote cannot fill the full target amount.",
+          code: "liquidity",
+        },
         { status: 409 },
       );
     }

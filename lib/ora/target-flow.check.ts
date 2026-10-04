@@ -2,6 +2,7 @@ process.env.SUPABASE_URL = "http://supabase.test";
 process.env.SUPABASE_SECRET_KEY = "test-secret";
 process.env.ROBINHOOD_RPC_URL = "http://rpc.test";
 process.env.ORBIO_MARKET_ORIGIN = "http://orbio.test";
+process.env.CRON_SECRET = "test-cron-secret";
 
 import {
   decodeFunctionData,
@@ -14,11 +15,18 @@ import {
 } from "viem";
 import type { DecisionRow } from "../db/rows";
 import type { TargetRow } from "../db/targets";
-import type { ExecutableQuote, MarketSnapshot } from "../../types/ora";
+import type {
+  ExecutableQuote,
+  ExecutionStatus,
+  MarketSnapshot,
+  ProcurementTarget,
+} from "../../types/ora";
 
 const { beneficiaryBytes32, exchangeAbi } = await import("../orbio/exchange");
 const { CONTRACTS } = await import("../orbio/contracts");
-const { fulfillTargetFromDecision } = await import("../db/targets");
+const { fulfillTargetFromDecision, persistTargetEvaluation, requireOwnedTarget } =
+  await import("../db/targets");
+const { evaluateTarget, marketSnapshotFromObservedBook } = await import("./target");
 
 function assert(condition: unknown, label: string): asserts condition {
   if (!condition) throw new Error(label);
@@ -58,6 +66,13 @@ let book = {
 let targets: TargetRow[] = [];
 let decisions: DecisionRow[] = [];
 let quoteUsdgBps = 75n;
+/** Quoted creditOut in atoms; null fills the requested amount exactly. */
+let quoteCreditOutAtoms: bigint | null = null;
+/** Requested sizes (atoms) whose quote call fails; "all" fails every quote. */
+let failingQuotes: Set<bigint> | "all" = new Set();
+/** Target ids whose evaluation write fails at the database. */
+let failingTargetWrites = new Set<string>();
+let observationRows: { slot_start: string }[] = [];
 let head = 1;
 const chain = new Map<string, { tx: unknown | null; receipt: unknown | null }>();
 const settings = {
@@ -122,12 +137,16 @@ function rpcResult(data: Hex): Hex {
   }
   if (call.functionName === "getQuoteForCredit") {
     const [creditAtoms] = call.args as [bigint, bigint];
+    if (failingQuotes === "all" || failingQuotes.has(creditAtoms)) {
+      throw new Error("rpc down");
+    }
+    const creditOut = quoteCreditOutAtoms ?? creditAtoms;
     return encodeFunctionResult({
       abi: exchangeAbi,
       functionName: "getQuoteForCredit",
       result: {
-        creditOut: creditAtoms,
-        usdgSpent: (creditAtoms * quoteUsdgBps) / 100n,
+        creditOut,
+        usdgSpent: (creditOut * quoteUsdgBps) / 100n,
         feeAtoms: 0n,
         fills: 1n,
         reason: 0,
@@ -260,6 +279,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     }
     if (method === "PATCH") {
       const found = filterTable(targets as unknown as Record<string, unknown>[], url) as unknown as TargetRow[];
+      if (found.some((row) => failingTargetWrites.has(row.id))) {
+        return json({ code: "XX000", message: "target write failed", details: null, hint: null }, 500);
+      }
       const patch = JSON.parse(String(init?.body)) as Partial<TargetRow>;
       for (const row of found) Object.assign(row, patch);
       if (asObject) {
@@ -274,6 +296,20 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       return json(found);
     }
   }
+  if (url.host === "supabase.test" && url.pathname === "/rest/v1/market_observations") {
+    if (method === "POST") {
+      const body = JSON.parse(String(init?.body)) as { slot_start: string };
+      if (observationRows.some((row) => row.slot_start === body.slot_start)) return json([], 201);
+      observationRows.push({ slot_start: body.slot_start });
+      return json([{ slot_start: body.slot_start }], 201);
+    }
+    if (method === "PATCH") {
+      const slot = url.searchParams.get("slot_start")?.slice(3);
+      const row = observationRows.find((r) => r.slot_start === slot);
+      if (row) Object.assign(row, JSON.parse(String(init?.body)));
+      return json(row ? [{ slot_start: row.slot_start }] : []);
+    }
+  }
   throw new Error(`fake fetch: unexpected ${method} ${url.href}`);
 }) as typeof fetch;
 
@@ -285,7 +321,9 @@ const quoteRoute = await import("../../app/api/quote/route");
 const validateRoute = await import("../../app/api/execute/validate/route");
 const abortRoute = await import("../../app/api/execute/abort/route");
 const receiptRoute = await import("../../app/api/execute/receipt/route");
-const { evaluateOpenTargetsAfterObservation } = await import("./watch-targets");
+const { evaluateAndPersistTarget, evaluateOpenTargetsAfterObservation } =
+  await import("./watch-targets");
+const observeRoute = await import("../../app/api/observe/route");
 
 async function post(
   route: { POST: (request: Request) => Promise<Response> },
@@ -398,6 +436,10 @@ function reset() {
   targets = [];
   decisions = [];
   quoteUsdgBps = 75n;
+  quoteCreditOutAtoms = null;
+  failingQuotes = new Set();
+  failingTargetWrites = new Set();
+  observationRows = [];
   head = 1;
   chain.clear();
   settings.spending_limit_usdg = 25;
@@ -857,6 +899,448 @@ reset();
     walletAddress: WALLET,
   });
   assert((again.body.target as { status: string }).status === "FULFILLED", "fulfilled cannot return to READY");
+}
+
+// ---------------------------------------------------------------------------
+// Continuous watching: inconclusive evaluations, isolation, in-flight
+// purchases, stale writes, and the full target amount.
+// ---------------------------------------------------------------------------
+
+const qualifyingBook = {
+  levels: [
+    { discountBps: 2500, creditAtoms: 80_000_000 },
+    { discountBps: 1000, creditAtoms: 100_000_000 },
+  ],
+  minBuyCreditAtoms: 5_000_000,
+  reportedTotalCreditAtoms: 180_000_000,
+  fingerprint: "obs-qualifying",
+};
+const thinBook = {
+  levels: [{ discountBps: 2500, creditAtoms: 30_000_000 }],
+  minBuyCreditAtoms: 5_000_000,
+  reportedTotalCreditAtoms: 30_000_000,
+  fingerprint: "obs-thin",
+};
+const READY_FIELDS = {
+  status: "READY",
+  last_evaluated_at: "2026-10-04T12:00:00.000Z",
+  last_evaluation_action: "BUY",
+  last_evaluation_reason: "ready fixture",
+  last_requested_amount: 50,
+  last_executable_discount_percent: 25,
+  last_executable_total_usdg: 37.5,
+} as const;
+
+function walletN(n: number): string {
+  return `0x${n.toString(16).padStart(40, "0")}`;
+}
+
+function seedTarget(id: string, overrides: Partial<TargetRow> = {}): TargetRow {
+  const row: TargetRow = {
+    id,
+    wallet_address: WALLET,
+    requested_credit: 50,
+    min_discount_percent: 20,
+    max_spend_usdg: 40,
+    status: "WATCHING",
+    created_at: "2026-10-04T12:00:00.000Z",
+    updated_at: "2026-10-04T12:00:00.000Z",
+    cancelled_at: null,
+    fulfilled_at: null,
+    active_decision_id: null,
+    fulfilled_decision_id: null,
+    last_evaluated_at: null,
+    last_evaluation_action: null,
+    last_evaluation_reason: null,
+    last_requested_amount: null,
+    last_executable_discount_percent: null,
+    last_executable_total_usdg: null,
+    ...overrides,
+  };
+  targets.push(row);
+  return row;
+}
+
+function seedDecision(
+  id: string,
+  wallet: string,
+  targetId: string,
+  status: ExecutionStatus,
+): DecisionRow {
+  const row: DecisionRow = {
+    id,
+    wallet_address: wallet,
+    timestamp: bookSnapshot.timestamp,
+    market: { price: 0.75, discountPercent: 25, availableDepth: 80 },
+    snapshot: bookSnapshot,
+    decision: "BUY",
+    reason: "fixture",
+    requested_amount: 50,
+    quote_price: 0.75,
+    quoted_usdg: 37.5,
+    quoted_at: bookSnapshot.timestamp,
+    validated_block: 1,
+    min_discount_percent: 20,
+    evaluated_requested_credit: null,
+    target_id: targetId,
+    execution_price: null,
+    tx_hash: status === "pending" ? hashOf(0xee) : null,
+    execution_status: status,
+    blocked_reason: null,
+    credit_acquired: null,
+    total_usdg_paid: null,
+    confirmed_at: null,
+    reasoning: null,
+  };
+  decisions.push(row);
+  return row;
+}
+
+function observe() {
+  return observeRoute.GET(
+    new Request("http://localhost/api/observe", {
+      headers: { authorization: "Bearer test-cron-secret" },
+    }),
+  );
+}
+
+// Quote failure on a qualifying book: READY stays READY with its quote fields.
+reset();
+{
+  seedTarget("tgt-ready-inconclusive", { ...READY_FIELDS });
+  const before = JSON.stringify(targets[0]);
+  failingQuotes = "all";
+  const results = await evaluateOpenTargetsAfterObservation(qualifyingBook);
+  assert(
+    results.length === 1 && results[0].result === "inconclusive",
+    `quote failure is inconclusive (got ${JSON.stringify(results)})`,
+  );
+  assert(JSON.stringify(targets[0]) === before, "READY target is unchanged by an inconclusive quote");
+  assert(decisions.length === 0, "inconclusive evaluation creates no decision");
+}
+
+// Quote failure on a qualifying book: WATCHING stays WATCHING.
+reset();
+{
+  seedTarget("tgt-watch-inconclusive");
+  const before = JSON.stringify(targets[0]);
+  failingQuotes = "all";
+  const results = await evaluateOpenTargetsAfterObservation(qualifyingBook);
+  assert(results[0].result === "inconclusive", "WATCHING quote failure is inconclusive");
+  assert(JSON.stringify(targets[0]) === before, "WATCHING target is unchanged by an inconclusive quote");
+}
+
+// Quote failure on page-load evaluate and review keeps the stored state.
+reset();
+{
+  seedTarget("tgt-live-inconclusive", { ...READY_FIELDS });
+  const before = JSON.stringify(targets[0]);
+  failingQuotes = "all";
+  const evaluated = await post(evaluateRoute, "/api/targets/evaluate", {
+    targetId: "tgt-live-inconclusive",
+    walletAddress: WALLET,
+  });
+  assert(evaluated.status === 200, "inconclusive live evaluate still answers");
+  assert((evaluated.body.target as { status: string }).status === "READY", "live evaluate keeps READY on quote failure");
+  assert(JSON.stringify(targets[0]) === before, "live evaluate writes nothing when inconclusive");
+  const reviewed = await post(reviewRoute, "/api/targets/review", {
+    targetId: "tgt-live-inconclusive",
+    walletAddress: WALLET,
+  });
+  assert(reviewed.status === 503 && reviewed.body.code === "inconclusive", "review refuses an inconclusive quote");
+  assert(!String(reviewed.body.error).includes("rpc down"), "review does not expose the infrastructure error");
+  assert(JSON.stringify(targets[0]) === before && decisions.length === 0, "inconclusive review changes nothing");
+}
+
+// A non-qualifying book is conclusive even when quotes are broken.
+reset();
+{
+  seedTarget("tgt-ready-thin", { ...READY_FIELDS });
+  failingQuotes = "all";
+  const results = await evaluateOpenTargetsAfterObservation(thinBook);
+  assert(results[0].result === "written", "non-qualifying book writes");
+  assert(targets[0].status === "WATCHING", "non-qualifying market returns READY to WATCHING");
+  assert(targets[0].last_executable_total_usdg == null, "WATCHING clears the READY quote");
+}
+
+// One pass, isolated targets: READY, INCONCLUSIVE, WATCHING, error, READY.
+reset();
+{
+  seedTarget("tgt-a", { wallet_address: walletN(0xa) });
+  seedTarget("tgt-b", { wallet_address: walletN(0xb), requested_credit: 60, max_spend_usdg: 60 });
+  seedTarget("tgt-c", { wallet_address: walletN(0xc), ...READY_FIELDS, min_discount_percent: 30 });
+  seedTarget("tgt-d", { wallet_address: walletN(0xd) });
+  seedTarget("tgt-e", { wallet_address: walletN(0xe), requested_credit: 70, max_spend_usdg: 60 });
+  failingQuotes = new Set([60_000_000n]);
+  failingTargetWrites = new Set(["tgt-d"]);
+  const bBefore = JSON.stringify(targets[1]);
+  const dBefore = JSON.stringify(targets[3]);
+  const results = await evaluateOpenTargetsAfterObservation(qualifyingBook);
+  const byId = Object.fromEntries(results.map((r) => [r.targetId, r.result]));
+  assert(results.length === 5, "every open target is visited");
+  assert(byId["tgt-a"] === "written" && targets[0].status === "READY", "A becomes READY");
+  assert(byId["tgt-b"] === "inconclusive" && JSON.stringify(targets[1]) === bBefore, "B is inconclusive and unchanged");
+  assert(byId["tgt-c"] === "written" && targets[2].status === "WATCHING", "C becomes WATCHING");
+  assert(byId["tgt-d"] === "error" && JSON.stringify(targets[3]) === dBefore, "D fails alone and is unchanged");
+  assert(byId["tgt-e"] === "written" && targets[4].status === "READY", "E becomes READY after D failed");
+}
+
+// The observation itself stays successful when one target evaluation fails.
+reset();
+{
+  seedTarget("tgt-ok", { wallet_address: walletN(0x1) });
+  seedTarget("tgt-broken", { wallet_address: walletN(0x2) });
+  failingTargetWrites = new Set(["tgt-broken"]);
+  const response = await observe();
+  const result = (await response.json()) as Record<string, unknown>;
+  assert(response.status === 200 && result.outcome === "succeeded", "observation succeeds despite a target failure");
+  assert(
+    observationRows.length === 1 &&
+      (observationRows[0] as { outcome?: string }).outcome === "succeeded",
+    "observation row is completed as succeeded",
+  );
+  assert(targets[0].status === "READY", "successful observation evaluates open targets");
+  assert(targets[1].status === "WATCHING", "failed target write leaves that target as it was");
+  const duplicate = (await (await observe()).json()) as Record<string, unknown>;
+  assert(duplicate.status === "duplicate", "duplicate scheduler call does not re-evaluate");
+}
+
+// In-flight purchase: awaiting_signature and pending targets are left alone.
+reset();
+{
+  const created = await post(createRoute, "/api/targets", targetBody);
+  const target = created.body.target as { id: string };
+  const reviewed = await post(reviewRoute, "/api/targets/review", {
+    targetId: target.id,
+    walletAddress: WALLET,
+  });
+  const record = reviewed.body.record as { id: string };
+  const quoted = await post(quoteRoute, "/api/quote", {
+    decisionId: record.id,
+    walletAddress: WALLET,
+  });
+  const validated = await post(validateRoute, "/api/execute/validate", {
+    decisionId: record.id,
+    quote: quoted.body.quote,
+    walletAddress: WALLET,
+  });
+  assert(validated.status === 200, `validate succeeds (got ${validated.status}: ${JSON.stringify(validated.body)})`);
+  assert(decisions[0].execution_status === "awaiting_signature", "decision awaits signature");
+  assert(targets[0].status === "READY" && targets[0].active_decision_id === record.id, "target is READY and linked");
+  const before = JSON.stringify(targets[0]);
+
+  let results = await evaluateOpenTargetsAfterObservation(thinBook);
+  assert(results[0].result === "in_flight", "watcher skips an awaiting_signature target");
+  assert(JSON.stringify(targets[0]) === before, "awaiting_signature target keeps READY and its quote fields");
+  book = {
+    rows: [{ discountBps: 2500, microUsd: "30000000" }],
+    totalMicroUsd: "30000000",
+    minBuyMicroUsd: "5000000",
+  };
+  const live = await post(evaluateRoute, "/api/targets/evaluate", {
+    targetId: target.id,
+    walletAddress: WALLET,
+  });
+  assert((live.body.target as { status: string }).status === "READY", "page-load evaluate leaves an in-flight target");
+  assert(JSON.stringify(targets[0]) === before, "page-load evaluate writes nothing while in flight");
+
+  const second = await post(reviewRoute, "/api/targets/review", {
+    targetId: target.id,
+    walletAddress: WALLET,
+  });
+  assert(second.status === 409 && second.body.code === "purchase_in_flight", "review refuses while awaiting_signature");
+  assert(decisions.length === 1, "no second purchase decision while awaiting_signature");
+
+  decisions[0].execution_status = "pending";
+  decisions[0].tx_hash = hashOf(0xab);
+  results = await evaluateOpenTargetsAfterObservation(thinBook);
+  assert(results[0].result === "in_flight", "watcher skips a pending target");
+  assert(JSON.stringify(targets[0]) === before, "pending target keeps READY and its quote fields");
+  const third = await post(reviewRoute, "/api/targets/review", {
+    targetId: target.id,
+    walletAddress: WALLET,
+  });
+  assert(third.status === 409 && third.body.code === "purchase_in_flight", "review refuses while pending");
+  assert(decisions.length === 1, "no second purchase decision while pending");
+}
+
+// Seeded pending WATCHING target is not promoted by a qualifying book.
+reset();
+{
+  seedTarget("tgt-pending-watch", { active_decision_id: "dec-pending" });
+  seedDecision("dec-pending", WALLET, "tgt-pending-watch", "pending");
+  const before = JSON.stringify(targets[0]);
+  const results = await evaluateOpenTargetsAfterObservation(qualifyingBook);
+  assert(results[0].result === "in_flight", "pending WATCHING target is skipped");
+  assert(JSON.stringify(targets[0]) === before, "pending WATCHING target is not promoted to READY");
+}
+
+// A finished active decision does not block watching.
+reset();
+{
+  seedTarget("tgt-old-decision", { active_decision_id: "dec-old" });
+  seedDecision("dec-old", WALLET, "tgt-old-decision", "stale_quote");
+  const results = await evaluateOpenTargetsAfterObservation(qualifyingBook);
+  assert(results[0].result === "written" && targets[0].status === "READY", "stale_quote active decision does not block READY");
+}
+
+// Stale writes: an older evaluation cannot overwrite a newer target state.
+reset();
+{
+  const created = await post(createRoute, "/api/targets", targetBody);
+  const snapshot = created.body.target as ProcurementTarget;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const newer = await post(evaluateRoute, "/api/targets/evaluate", {
+    targetId: snapshot.id,
+    walletAddress: WALLET,
+  });
+  assert((newer.body.target as { status: string }).status === "READY", "newer evaluation is READY");
+  assert(targets[0].updated_at !== snapshot.updatedAt, "newer evaluation advanced updated_at");
+  const after = JSON.stringify(targets[0]);
+
+  const stale = await evaluateTarget(marketSnapshotFromObservedBook(thinBook), targetBody);
+  assert(stale.outcome === "NOT_QUALIFIED", "older evaluation would be WATCHING");
+  const written = await persistTargetEvaluation(snapshot, stale);
+  assert(written === null, "stale write is refused");
+  assert(JSON.stringify(targets[0]) === after, "older evaluation did not overwrite READY");
+  const watched = await evaluateAndPersistTarget(
+    snapshot,
+    marketSnapshotFromObservedBook(thinBook),
+    undefined,
+  );
+  assert(watched.kind === "superseded", "watcher reports a superseded evaluation");
+  assert(JSON.stringify(targets[0]) === after, "superseded watcher pass did not overwrite READY");
+
+  const current = await requireOwnedTarget(snapshot.id, WALLET);
+  assert("target" in current, "current target readable");
+  const fresh = await persistTargetEvaluation(current.target, stale);
+  assert(fresh?.status === "WATCHING", "an evaluation of the current state does write");
+}
+
+// Stale writes: a watcher snapshot taken before review cannot undo the review link.
+reset();
+{
+  const created = await post(createRoute, "/api/targets", targetBody);
+  const snapshot = created.body.target as ProcurementTarget;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const reviewed = await post(reviewRoute, "/api/targets/review", {
+    targetId: snapshot.id,
+    walletAddress: WALLET,
+  });
+  const record = reviewed.body.record as { id: string };
+  const after = JSON.stringify(targets[0]);
+  const watched = await evaluateAndPersistTarget(
+    snapshot,
+    marketSnapshotFromObservedBook(thinBook),
+    undefined,
+  );
+  assert(watched.kind === "superseded", "pre-review snapshot is superseded");
+  assert(JSON.stringify(targets[0]) === after, "pre-review snapshot did not overwrite the reviewed target");
+  assert(targets[0].active_decision_id === record.id, "review link survives the stale write");
+}
+
+// Full target amount: 50 CREDIT target with a 47 CREDIT executable quote.
+reset();
+{
+  const created = await post(createRoute, "/api/targets", targetBody);
+  const target = created.body.target as { id: string };
+  quoteCreditOutAtoms = 47_000_000n;
+  const evaluated = await post(evaluateRoute, "/api/targets/evaluate", {
+    targetId: target.id,
+    walletAddress: WALLET,
+  });
+  const partial = evaluated.body.target as ProcurementTarget;
+  assert(partial.status === "WATCHING", "47 of 50 CREDIT is not READY");
+  assert(partial.lastEvaluationAction === "WAIT", "partial fill records WAIT");
+  assert(partial.lastExecutableTotalUsdg == null, "partial fill stores no READY quote");
+  const results = await evaluateOpenTargetsAfterObservation(qualifyingBook);
+  assert(results[0].result === "written" && targets[0].status === "WATCHING", "watcher keeps a partial fill WATCHING");
+  const reviewed = await post(reviewRoute, "/api/targets/review", {
+    targetId: target.id,
+    walletAddress: WALLET,
+  });
+  assert(reviewed.status === 409 && reviewed.body.code === "not_ready", "review refuses a partial fill");
+  assert(decisions.length === 0, "partial fill creates no BUY decision");
+
+  quoteCreditOutAtoms = null;
+  const full = await post(evaluateRoute, "/api/targets/evaluate", {
+    targetId: target.id,
+    walletAddress: WALLET,
+  });
+  assert((full.body.target as { status: string }).status === "READY", "50 of 50 CREDIT is READY");
+}
+
+// Full target amount: quote and validate refuse a partial fill after review.
+reset();
+{
+  const created = await post(createRoute, "/api/targets", targetBody);
+  const target = created.body.target as { id: string };
+  const reviewed = await post(reviewRoute, "/api/targets/review", {
+    targetId: target.id,
+    walletAddress: WALLET,
+  });
+  const record = reviewed.body.record as { id: string };
+  quoteCreditOutAtoms = 47_000_000n;
+  const partialQuote = await post(quoteRoute, "/api/quote", {
+    decisionId: record.id,
+    walletAddress: WALLET,
+  });
+  assert(partialQuote.status === 409 && partialQuote.body.code === "liquidity", "quote refuses a partial target fill");
+  quoteCreditOutAtoms = null;
+  const quoted = await post(quoteRoute, "/api/quote", {
+    decisionId: record.id,
+    walletAddress: WALLET,
+  });
+  assert(quoted.status === 200, "full quote is offered");
+  quoteCreditOutAtoms = 47_000_000n;
+  const validated = await post(validateRoute, "/api/execute/validate", {
+    decisionId: record.id,
+    quote: quoted.body.quote,
+    walletAddress: WALLET,
+  });
+  assert(validated.status === 409 && validated.body.code === "liquidity", "validate refuses a partial target fill");
+  assert(decisions[0].execution_status === "blocked_liquidity", "partial revalidation is blocked, not signable");
+  assert(targets[0].status !== "FULFILLED", "partial quote does not fulfill");
+}
+
+// Only the target's active decision can be validated for signing.
+reset();
+{
+  const created = await post(createRoute, "/api/targets", targetBody);
+  const target = created.body.target as { id: string };
+  const first = await post(reviewRoute, "/api/targets/review", {
+    targetId: target.id,
+    walletAddress: WALLET,
+  });
+  const firstRecord = first.body.record as { id: string };
+  const firstQuote = await post(quoteRoute, "/api/quote", {
+    decisionId: firstRecord.id,
+    walletAddress: WALLET,
+  });
+  const second = await post(reviewRoute, "/api/targets/review", {
+    targetId: target.id,
+    walletAddress: WALLET,
+  });
+  assert(second.status === 200, "a new review is allowed before anything is signable");
+  const secondRecord = second.body.record as { id: string };
+  assert(targets[0].active_decision_id === secondRecord.id, "the newer review is active");
+  const old = await post(validateRoute, "/api/execute/validate", {
+    decisionId: firstRecord.id,
+    quote: firstQuote.body.quote,
+    walletAddress: WALLET,
+  });
+  assert(old.status === 409 && old.body.code === "target_superseded", "superseded target purchase cannot be validated");
+  assert(decisions[0].execution_status !== "awaiting_signature", "superseded purchase is not signable");
+  const secondQuote = await post(quoteRoute, "/api/quote", {
+    decisionId: secondRecord.id,
+    walletAddress: WALLET,
+  });
+  const current = await post(validateRoute, "/api/execute/validate", {
+    decisionId: secondRecord.id,
+    quote: secondQuote.body.quote,
+    walletAddress: WALLET,
+  });
+  assert(current.status === 200, "the active target purchase validates");
 }
 
 console.log("target flow ok");

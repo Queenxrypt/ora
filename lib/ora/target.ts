@@ -2,6 +2,7 @@ import type {
   DecisionAction,
   DecisionRecord,
   ExecutableTerms,
+  ExecutionStatus,
   MarketSnapshot,
   OraDecision,
   ProcurementParams,
@@ -10,8 +11,24 @@ import type {
 } from "../../types/ora";
 import { ATOMS } from "../orbio/contracts";
 import { decide, decideWithExecutableQuote } from "./decision";
+import { formatCredit } from "./format";
 
 export const OPEN_TARGET_STATUSES: TargetStatus[] = ["WATCHING", "READY"];
+
+/** A target purchase in these states has been validated for signing or submitted onchain. */
+export const PURCHASE_IN_FLIGHT_STATUSES: ExecutionStatus[] = [
+  "awaiting_signature",
+  "pending",
+];
+
+export function isPurchaseInFlight(
+  record: Pick<DecisionRecord, "executionStatus"> | null | undefined,
+): boolean {
+  return (
+    record?.executionStatus != null &&
+    PURCHASE_IN_FLIGHT_STATUSES.includes(record.executionStatus)
+  );
+}
 
 export const TARGET_STATUS_COPY: Record<
   Exclude<TargetStatus, "CANCELLED">,
@@ -37,15 +54,36 @@ export type TargetParams = {
   maxSpendUsdg: number;
 };
 
+/** Resolves to null (or throws) when no executable quote could be obtained. */
 export type TargetQuoteFn = (
   requestedCredit: number,
 ) => Promise<ExecutableTerms | null>;
 
-export type TargetEvaluation = {
-  status: "WATCHING" | "READY";
+export type ConclusiveTargetEvaluation =
+  | {
+      outcome: "QUALIFIED";
+      status: "READY";
+      decision: OraDecision;
+      quoted: true;
+    }
+  | {
+      outcome: "NOT_QUALIFIED";
+      status: "WATCHING";
+      decision: OraDecision;
+      quoted: boolean;
+    };
+
+/** No market conclusion was reached; the target's current state must be kept. */
+export type InconclusiveTargetEvaluation = {
+  outcome: "INCONCLUSIVE";
+  cause: "quote_skipped" | "quote_unavailable";
   decision: OraDecision;
   quoted: boolean;
 };
+
+export type TargetEvaluation =
+  | ConclusiveTargetEvaluation
+  | InconclusiveTargetEvaluation;
 
 export type ObservedTargetBook = {
   levels: { discountBps: number; creditAtoms: number }[];
@@ -178,10 +216,18 @@ export function executableTermsFromQuote(terms: {
   };
 }
 
+/** Compared in CREDIT atoms so float noise cannot pass or fail a full fill. */
+export function fillsRequestedCredit(
+  creditOut: number,
+  requestedCredit: number,
+): boolean {
+  return Math.round(creditOut * ATOMS) >= Math.round(requestedCredit * ATOMS);
+}
+
 /**
  * Shared target evaluator. Book screening always runs first via `decide`.
- * READY requires a passing executable quote for the same requested amount.
- * Omitting `quote` never produces READY.
+ * READY requires a passing executable quote that fills the whole requested
+ * amount. A skipped or failed quote is INCONCLUSIVE, never READY or WATCHING.
  */
 export async function evaluateTarget(
   market: MarketSnapshot,
@@ -191,10 +237,20 @@ export async function evaluateTarget(
   const procurement = targetProcurementParams(params);
   const book = decide(market, procurement);
   if (book.action !== "BUY" || book.requestedAmount == null) {
-    return { status: "WATCHING", decision: book, quoted: false };
+    return {
+      outcome: "NOT_QUALIFIED",
+      status: "WATCHING",
+      decision: book,
+      quoted: false,
+    };
   }
   if (!quote) {
-    return { status: "WATCHING", decision: book, quoted: false };
+    return {
+      outcome: "INCONCLUSIVE",
+      cause: "quote_skipped",
+      decision: book,
+      quoted: false,
+    };
   }
   let terms: ExecutableTerms | null;
   try {
@@ -202,15 +258,43 @@ export async function evaluateTarget(
   } catch {
     terms = null;
   }
-  const result = decideWithExecutableQuote(market, procurement, terms);
-  if (result.action === "BUY" && result.executable) {
-    return { status: "READY", decision: result, quoted: true };
+  if (!terms) {
+    return {
+      outcome: "INCONCLUSIVE",
+      cause: "quote_unavailable",
+      decision: book,
+      quoted: true,
+    };
   }
-  return { status: "WATCHING", decision: result, quoted: true };
+  const result = decideWithExecutableQuote(market, procurement, terms);
+  if (result.action !== "BUY" || !result.executable) {
+    return {
+      outcome: "NOT_QUALIFIED",
+      status: "WATCHING",
+      decision: result,
+      quoted: true,
+    };
+  }
+  if (!fillsRequestedCredit(terms.creditOut, book.requestedAmount)) {
+    return {
+      outcome: "NOT_QUALIFIED",
+      status: "WATCHING",
+      decision: {
+        action: "WAIT",
+        timestamp: result.timestamp,
+        market: result.market,
+        params: result.params,
+        reason: `Executable quote fills ${formatCredit(terms.creditOut)} of the ${formatCredit(book.requestedAmount)} CREDIT target.`,
+        executable: terms,
+      },
+      quoted: true,
+    };
+  }
+  return { outcome: "QUALIFIED", status: "READY", decision: result, quoted: true };
 }
 
 export function evaluationWrite(
-  evaluation: TargetEvaluation,
+  evaluation: ConclusiveTargetEvaluation,
   now = new Date(),
 ): {
   status: "WATCHING" | "READY";

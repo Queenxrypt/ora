@@ -8,7 +8,10 @@ import {
   type AmountRejection,
 } from "../../../lib/ora/quote-amount";
 import { quoteMeetsMinDiscount } from "../../../lib/ora/quote-rule";
-import { paramsForTargetLinkedDecision } from "../../../lib/ora/target";
+import {
+  fillsRequestedCredit,
+  paramsForTargetLinkedDecision,
+} from "../../../lib/ora/target";
 import {
   readSettings,
   requireOwnedDecision,
@@ -102,6 +105,16 @@ export async function POST(request: Request) {
     if (quote.creditOut <= 0) {
       return NextResponse.json(
         { error: "Insufficient liquidity for this size.", code: "liquidity" },
+        { status: 409 },
+      );
+    }
+
+    if (frozen && !fillsRequestedCredit(quote.creditOut, requestedCredit)) {
+      return NextResponse.json(
+        {
+          error: "The executable quote cannot fill the full target amount. Purchase is not offered.",
+          code: "liquidity",
+        },
         { status: 409 },
       );
     }

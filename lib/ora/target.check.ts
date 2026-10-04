@@ -2,10 +2,13 @@ import { decide, decideWithExecutableQuote, DEFAULT_PARAMS } from "./decision";
 import {
   evaluateTarget,
   evaluationWrite,
+  fillsRequestedCredit,
+  isPurchaseInFlight,
   marketSnapshotFromObservedBook,
   paramsForTargetLinkedDecision,
   targetProcurementParams,
   validateTargetFields,
+  type ConclusiveTargetEvaluation,
 } from "./target";
 import type { DecisionRecord, ExecutableTerms, MarketSnapshot } from "../../types/ora";
 import { readFileSync } from "node:fs";
@@ -92,6 +95,7 @@ assert(params.spendingLimitUsdg === 40 && params.requestedCredit === 50, "target
 const bookThin = decide(thin30, params);
 assert(bookThin.action === "WAIT", "30 CREDIT at 25% cannot fill a 50 CREDIT target");
 const evalThin = await evaluateTarget(thin30, target50, quoteOf(passQuote));
+assert(evalThin.outcome === "NOT_QUALIFIED", "insufficient size is NOT_QUALIFIED");
 assert(evalThin.status === "WATCHING" && evalThin.quoted === false, "insufficient size never quotes");
 assert(evalThin.decision.action === "WAIT", "insufficient size is WAIT");
 
@@ -106,6 +110,7 @@ const evalFill = await evaluateTarget(fillable50, target50, async (amount) => {
   return passQuote;
 });
 assert(quotedAmount === 50, "quote is for the full requested amount");
+assert(evalFill.outcome === "QUALIFIED", "passing executable quote is QUALIFIED");
 assert(evalFill.status === "READY", "passing executable quote is READY");
 assert(evalFill.quoted === true, "READY evaluation recorded a quote");
 assert(evalFill.decision.executable?.totalUsdg === 37.6, "READY stores executable USDG, not book price");
@@ -116,6 +121,7 @@ const lowDiscount = await evaluateTarget(fillable50, target50, quoteOf({
   ...passQuote,
   discountPercent: 19.9,
 }));
+assert(lowDiscount.outcome === "NOT_QUALIFIED", "executable discount miss is NOT_QUALIFIED");
 assert(lowDiscount.status === "WATCHING" && lowDiscount.quoted === true, "executable discount miss stays WATCHING");
 assert(lowDiscount.decision.action === "WAIT", "discount miss is WAIT after quote");
 
@@ -124,21 +130,53 @@ const overSpend = await evaluateTarget(fillable50, target50, quoteOf({
   ...passQuote,
   totalUsdg: 40.01,
 }));
-assert(overSpend.status === "WATCHING", "executable total above max spend stays WATCHING");
+assert(overSpend.outcome === "NOT_QUALIFIED" && overSpend.status === "WATCHING", "executable total above max spend stays WATCHING");
+
+// Full target amount: a partial executable fill is never READY.
+const partial = await evaluateTarget(fillable50, target50, quoteOf({
+  ...passQuote,
+  creditOut: 47,
+  totalUsdg: 35.25,
+}));
+assert(partial.outcome === "NOT_QUALIFIED" && partial.status === "WATCHING", "50 CREDIT target with a 47 CREDIT quote is not READY");
+assert(partial.decision.action === "WAIT", "partial fill is WAIT");
+assert(partial.decision.reason.includes("47") && partial.decision.reason.includes("50"), "partial fill reason names both amounts");
+assert(evaluationWrite(partial).lastExecutableTotalUsdg == null, "partial fill stores no READY quote");
+const exact = await evaluateTarget(fillable50, target50, quoteOf({ ...passQuote, creditOut: 50 }));
+assert(exact.outcome === "QUALIFIED", "50 CREDIT target with a 50 CREDIT quote is eligible");
+assert(fillsRequestedCredit(50, 50) && fillsRequestedCredit(50.000001, 50), "full or larger fill passes");
+assert(!fillsRequestedCredit(49.999999, 50), "one atom short fails");
+assert(fillsRequestedCredit(0.1 + 0.2, 0.3), "float noise does not fail a full fill");
 
 // READY only after executable quote passes — book-only never READY.
 const bookOnly = await evaluateTarget(fillable50, target50);
-assert(bookOnly.status === "WATCHING" && bookOnly.quoted === false, "book BUY without a quote is not READY");
+assert(bookOnly.outcome === "INCONCLUSIVE" && bookOnly.quoted === false, "book BUY without a quote is INCONCLUSIVE, not READY");
+assert(bookOnly.cause === "quote_skipped", "skipped quote is named");
+assert(!("status" in bookOnly), "INCONCLUSIVE carries no target status");
 assert(decide(fillable50, params).action === "BUY", "control: the book itself qualifies");
 
-// Quote unavailable.
+// Quote unavailable is INCONCLUSIVE, not market information.
 const noQuote = await evaluateTarget(fillable50, target50, async () => null);
-assert(noQuote.status === "WATCHING", "missing quote stays WATCHING");
+assert(noQuote.outcome === "INCONCLUSIVE" && noQuote.cause === "quote_unavailable", "missing quote is INCONCLUSIVE");
 
 const threw = await evaluateTarget(fillable50, target50, async () => {
   throw new Error("rpc down");
 });
-assert(threw.status === "WATCHING", "quote failure stays WATCHING");
+assert(threw.outcome === "INCONCLUSIVE" && threw.cause === "quote_unavailable", "quote failure is INCONCLUSIVE");
+
+// A book that cannot qualify needs no quote, so a broken quote never blocks WATCHING.
+const thinBroken = await evaluateTarget(thin30, target50, async () => {
+  throw new Error("rpc down");
+});
+assert(thinBroken.outcome === "NOT_QUALIFIED", "non-qualifying book is conclusive without a quote");
+
+// Purchase-in-flight statuses.
+assert(isPurchaseInFlight({ executionStatus: "awaiting_signature" }), "awaiting_signature is in flight");
+assert(isPurchaseInFlight({ executionStatus: "pending" }), "pending is in flight");
+for (const status of ["none", "review", "quoting", "success", "failed", "stale_quote", "blocked_liquidity"] as const) {
+  assert(!isPurchaseInFlight({ executionStatus: status }), `${status} is not in flight`);
+}
+assert(!isPurchaseInFlight(null) && !isPurchaseInFlight({}), "no decision is not in flight");
 
 // Repeated evaluation is deterministic.
 const again = await evaluateTarget(fillable50, target50, quoteOf(passQuote));
@@ -148,11 +186,11 @@ assert(again.status === evalFill.status && again.decision.action === evalFill.de
 const reverted = await evaluateTarget(thin30, target50, quoteOf(passQuote));
 assert(reverted.status === "WATCHING", "lost size returns to WATCHING");
 
-const writeReady = evaluationWrite(evalFill, new Date("2026-09-29T12:00:00.000Z"));
+const writeReady = evaluationWrite(evalFill as ConclusiveTargetEvaluation, new Date("2026-09-29T12:00:00.000Z"));
 assert(writeReady.status === "READY", "write keeps READY");
 assert(writeReady.lastExecutableTotalUsdg === 37.6, "write stores executable USDG");
 assert(writeReady.lastExecutableDiscountPercent === 24.8, "write stores executable discount");
-const writeWatch = evaluationWrite(reverted, new Date("2026-09-29T12:01:00.000Z"));
+const writeWatch = evaluationWrite(reverted as ConclusiveTargetEvaluation, new Date("2026-09-29T12:01:00.000Z"));
 assert(writeWatch.status === "WATCHING", "write keeps WATCHING");
 assert(writeWatch.lastExecutableTotalUsdg == null, "WATCHING clears stored executable USDG");
 
@@ -218,9 +256,24 @@ assert(!createSource.includes("writeSettings"), "create must not modify procurem
 assert(!evalSource.includes("appendDecision"), "evaluate must not create a decision");
 assert(!observeSource.includes("appendDecision"), "observation must not create a decision");
 inOrder(reviewSource, "review", [
+  "targetPurchaseInFlight(access.target)",
   "evaluateTarget(",
+  'evaluation.outcome === "INCONCLUSIVE"',
+  "persistTargetEvaluation(access.target, evaluation)",
   "appendDecision(",
   'executionStatus: "none"',
+]);
+inOrder(quoteSource, "quote full fill", [
+  "quoteForCredit(requestedCredit)",
+  "fillsRequestedCredit(quote.creditOut, requestedCredit)",
+  "quote.totalUsdg > params.spendingLimitUsdg",
+]);
+inOrder(validateSource, "validate active purchase", [
+  "paramsForTargetLinkedDecision(current)",
+  "linked.target.activeDecisionId !== current.id",
+  "quoteForCredit(requestedCredit)",
+  "fillsRequestedCredit(fresh.creditOut, requestedCredit)",
+  "fresh.totalUsdg > params.spendingLimitUsdg",
 ]);
 assert(!reviewSource.includes("/api/targets/buy"), "no second buy route");
 inOrder(quoteSource, "frozen quote", [

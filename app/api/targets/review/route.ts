@@ -12,7 +12,10 @@ import {
   isOpenTargetStatus,
   paramsFromTarget,
 } from "../../../../lib/ora/target";
-import { quoteTargetTerms } from "../../../../lib/ora/watch-targets";
+import {
+  quoteTargetTerms,
+  targetPurchaseInFlight,
+} from "../../../../lib/ora/watch-targets";
 import { readMarketSnapshot } from "../../../../lib/orbio/market";
 import {
   missingWalletResponse,
@@ -47,20 +50,50 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: denied.error, target: access.target }, { status: denied.status });
     }
 
+    if (await targetPurchaseInFlight(access.target)) {
+      return NextResponse.json(
+        {
+          error:
+            "A purchase for this target is already awaiting signature or confirmation.",
+          code: "purchase_in_flight",
+          target: access.target,
+        },
+        { status: 409 },
+      );
+    }
+
     const market = await readMarketSnapshot();
     const evaluation = await evaluateTarget(
       market,
       paramsFromTarget(access.target),
       quoteTargetTerms,
     );
-    const target =
-      (await persistTargetEvaluation(
-        access.target.id,
-        wallet,
-        evaluation,
-      )) ?? access.target;
+    if (evaluation.outcome === "INCONCLUSIVE") {
+      return NextResponse.json(
+        {
+          error:
+            "Ora could not confirm an executable quote right now. The target is unchanged. Try again shortly.",
+          code: "inconclusive",
+          target: access.target,
+        },
+        { status: 503 },
+      );
+    }
 
-    if (evaluation.status !== "READY" || evaluation.decision.action !== "BUY") {
+    const target = await persistTargetEvaluation(access.target, evaluation);
+    if (!target) {
+      const latest = await requireOwnedTarget(access.target.id, wallet);
+      return NextResponse.json(
+        {
+          error: "This target changed while Ora was checking it. Try again.",
+          code: "target_changed",
+          target: "target" in latest ? latest.target : access.target,
+        },
+        { status: 409 },
+      );
+    }
+
+    if (evaluation.outcome !== "QUALIFIED" || evaluation.decision.action !== "BUY") {
       return NextResponse.json(
         {
           error:
