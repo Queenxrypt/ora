@@ -1695,6 +1695,24 @@ a.btn:hover {
   margin: 14px 0 4px;
 }
 
+.telegram-alerts {
+  margin: 22px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.telegram-alerts-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #3b0a12;
+}
+
+.telegram-alerts .target-actions {
+  margin-top: 10px;
+}
+
 .target-body .procurement-check {
   margin-top: 12px;
 }

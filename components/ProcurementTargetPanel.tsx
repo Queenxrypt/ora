@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { MarketSnapshot, ProcurementTarget, UserSettings } from "../types/ora";
 import { TARGET_STATUS_COPY } from "../lib/ora/target";
 import { formatCredit, formatPrice } from "../lib/ora/format";
+import { TelegramAlerts } from "./TelegramAlerts";
 
 type Draft = {
   requestedCredit: number;
@@ -155,6 +156,8 @@ export function ProcurementTargetPanel({
           </form>
         </>
       )}
+
+      {connected && <TelegramAlerts />}
     </section>
   );
 }

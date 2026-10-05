@@ -137,6 +137,12 @@ Copy `.env.example` to `.env.local` for local runs. Keep secret values out of th
 | `ROBINHOOD_RPC_URL` | Robinhood Chain RPC. Defaults to `https://rpc.mainnet.chain.robinhood.com`. |
 | `ORBIO_MARKET_ORIGIN` | Origin for the CREDIT order book. Defaults to `https://www.orbio.so`. |
 | `ORBIO_REASONING_MODEL` | Reasoning model id. Defaults to `google/gemini-3.8-flash` when unset. |
+| `TELEGRAM_BOT_TOKEN` | Server-side Telegram bot token. Used only by the manual `npm run telegram:webhook` helper; Ora does not send messages yet. |
+| `TELEGRAM_BOT_USERNAME` | Bot username (without `@`) used to build the one-time `t.me` link. Connect Telegram stays unavailable when unset. |
+| `TELEGRAM_WEBHOOK_SECRET` | 32–256 characters of `A-Z a-z 0-9 _ -`. Telegram sends it in `X-Telegram-Bot-Api-Secret-Token`; the webhook rejects every request when it is unset. |
+| `TELEGRAM_ALERTS_ENABLED` | Reserved for alert delivery. Keep `false`; nothing is sent in this version. |
+
+Telegram linking: the wallet signs a server-issued message that authorizes no transaction, spending or purchase. Ora then returns a one-time link that expires after 10 minutes. The link is created only when Telegram delivers `/start <token>` to the authenticated webhook from a private chat. `/stop` in that chat disconnects it. Register the webhook explicitly with `npm run telegram:webhook -- set`; with no argument the helper only reads the current webhook.
 
 ORBIO_API_KEY is required for Ora's Orbio reasoning layer. The deterministic procurement rule remains available if the reasoning service is temporarily unavailable.
 
