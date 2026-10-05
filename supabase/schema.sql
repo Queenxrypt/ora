@@ -103,6 +103,7 @@ create table if not exists public.procurement_targets (
   last_requested_amount double precision,
   last_executable_discount_percent double precision,
   last_executable_total_usdg double precision,
+  ready_since timestamptz,
   constraint procurement_targets_credit_check
     check (requested_credit > 0),
   constraint procurement_targets_discount_check
@@ -117,8 +118,35 @@ create table if not exists public.procurement_targets (
     check (
       (status = 'FULFILLED' and fulfilled_at is not null and fulfilled_decision_id is not null)
       or (status <> 'FULFILLED' and fulfilled_at is null and fulfilled_decision_id is null)
-    )
+    ),
+  constraint procurement_targets_ready_since_check
+    check ((status = 'READY') = (ready_since is not null))
 );
+
+-- ready_since marks the start of the current READY period for every write path.
+create or replace function public.procurement_targets_track_ready_since()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.status = 'READY' then
+    if tg_op = 'UPDATE' and old.status = 'READY' then
+      new.ready_since := coalesce(old.ready_since, new.ready_since, now());
+    else
+      new.ready_since := now();
+    end if;
+  else
+    new.ready_since := null;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists procurement_targets_ready_since on public.procurement_targets;
+create trigger procurement_targets_ready_since
+  before insert or update on public.procurement_targets
+  for each row execute function public.procurement_targets_track_ready_since();
 
 create unique index if not exists procurement_targets_one_open_per_wallet
   on public.procurement_targets (wallet_address)
@@ -130,7 +158,52 @@ create index if not exists procurement_targets_wallet_created_idx
 create index if not exists procurement_targets_status_idx
   on public.procurement_targets (status);
 
+-- One alert record per target READY period and channel.
+-- Rows are created only when the scheduler moves a target from WATCHING to READY.
+create table if not exists public.target_alerts (
+  id text primary key,
+  target_id text not null references public.procurement_targets (id),
+  wallet_address text not null,
+  channel text not null,
+  ready_since timestamptz not null,
+  status text not null,
+  attempts integer not null default 0,
+  next_attempt_at timestamptz,
+  claimed_at timestamptz,
+  sent_at timestamptz,
+  telegram_message_id bigint,
+  last_error text,
+  created_at timestamptz not null default now(),
+  constraint target_alerts_channel_check
+    check (channel in ('telegram')),
+  constraint target_alerts_status_check
+    check (status in (
+      'pending',
+      'sending',
+      'sent',
+      'failed_retryable',
+      'failed_permanent',
+      'unknown',
+      'skipped',
+      'suppressed'
+    )),
+  constraint target_alerts_attempts_check
+    check (attempts >= 0),
+  constraint target_alerts_sent_check
+    check ((status = 'sent') = (sent_at is not null)),
+  constraint target_alerts_period_key
+    unique (target_id, ready_since, channel)
+);
+
+create index if not exists target_alerts_target_channel_created_idx
+  on public.target_alerts (target_id, channel, created_at desc);
+
+create index if not exists target_alerts_due_idx
+  on public.target_alerts (next_attempt_at)
+  where status in ('pending', 'failed_retryable');
+
 alter table public.decisions enable row level security;
 alter table public.settings enable row level security;
 alter table public.market_observations enable row level security;
 alter table public.procurement_targets enable row level security;
+alter table public.target_alerts enable row level security;

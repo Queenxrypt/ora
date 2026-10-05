@@ -91,6 +91,35 @@ export async function evaluateAndPersistTarget(
 }
 
 /**
+ * True when this write started a READY period. `before` is the row the write
+ * was conditioned on, so its status is exactly the status that was replaced.
+ */
+export function startedReadyPeriod(
+  before: Pick<ProcurementTarget, "status">,
+  outcome: TargetWatchOutcome,
+): outcome is { kind: "written"; target: ProcurementTarget } {
+  return (
+    outcome.kind === "written" &&
+    before.status === "WATCHING" &&
+    outcome.target.status === "READY" &&
+    Boolean(outcome.target.readySince)
+  );
+}
+
+async function recordReadyAlertsAfterObservation(targets: ProcurementTarget[]) {
+  if (targets.length === 0) return;
+  try {
+    const { recordReadyAlerts } = await import("./alerts/record-ready-alerts");
+    await recordReadyAlerts(targets);
+  } catch (error) {
+    console.error(
+      "Ready alerts after observation failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
+/**
  * After a succeeded observation: cheap book screen for every open target,
  * then quote only when the book can fill the full requested amount.
  * Each target is isolated; failures here must not fail the observation.
@@ -109,6 +138,7 @@ export async function evaluateOpenTargetsAfterObservation(
   const deadline = Date.now() + OBSERVATION_QUOTE_BUDGET_MS;
   let quotes = 0;
   const results: TargetWatchResult[] = [];
+  const becameReady: ProcurementTarget[] = [];
 
   for (const target of open) {
     const remaining = deadline - Date.now();
@@ -127,6 +157,7 @@ export async function evaluateOpenTargetsAfterObservation(
             }
           : undefined,
       );
+      if (startedReadyPeriod(target, outcome)) becameReady.push(outcome.target);
       results.push({ targetId: target.id, result: outcome.kind });
     } catch (error) {
       console.error(
@@ -136,6 +167,7 @@ export async function evaluateOpenTargetsAfterObservation(
       results.push({ targetId: target.id, result: "error" });
     }
   }
+  await recordReadyAlertsAfterObservation(becameReady);
   return results;
 }
 

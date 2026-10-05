@@ -35,6 +35,7 @@ export type TargetRow = {
   last_requested_amount: number | null;
   last_executable_discount_percent: number | null;
   last_executable_total_usdg: number | null;
+  ready_since: string | null;
 };
 
 function throwIfError(error: { message: string; code?: string } | null) {
@@ -97,6 +98,7 @@ export function rowToTarget(row: TargetRow): ProcurementTarget {
     ...(asNumber(row.last_executable_total_usdg) != null
       ? { lastExecutableTotalUsdg: asNumber(row.last_executable_total_usdg) }
       : {}),
+    ...(asString(row.ready_since) ? { readySince: asString(row.ready_since) } : {}),
   };
 }
 
@@ -110,7 +112,7 @@ export function targetBelongsToWallet(
 }
 
 const TARGET_COLUMNS =
-  "id, wallet_address, requested_credit, min_discount_percent, max_spend_usdg, status, created_at, updated_at, cancelled_at, fulfilled_at, active_decision_id, fulfilled_decision_id, last_evaluated_at, last_evaluation_action, last_evaluation_reason, last_requested_amount, last_executable_discount_percent, last_executable_total_usdg";
+  "id, wallet_address, requested_credit, min_discount_percent, max_spend_usdg, status, created_at, updated_at, cancelled_at, fulfilled_at, active_decision_id, fulfilled_decision_id, last_evaluated_at, last_evaluation_action, last_evaluation_reason, last_requested_amount, last_executable_discount_percent, last_executable_total_usdg, ready_since";
 
 export async function insertTarget(
   walletAddress: string,

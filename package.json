@@ -27,7 +27,8 @@
     "test:outcome-engine": "tsx lib/ora/outcome-engine.check.ts",
     "test:performance": "tsx lib/ora/performance.check.ts",
     "test:target": "tsx lib/ora/target.check.ts",
-    "test:target-flow": "tsx lib/ora/target-flow.check.ts"
+    "test:target-flow": "tsx lib/ora/target-flow.check.ts",
+    "test:alerts": "tsx lib/ora/alerts/ready-alert.check.ts"
   },
   "dependencies": {
     "@openrouter/sdk": "^1.3.1",

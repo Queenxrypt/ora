@@ -73,6 +73,7 @@ let failingQuotes: Set<bigint> | "all" = new Set();
 /** Target ids whose evaluation write fails at the database. */
 let failingTargetWrites = new Set<string>();
 let observationRows: { slot_start: string }[] = [];
+let alertRows: Record<string, unknown>[] = [];
 let head = 1;
 const chain = new Map<string, { tx: unknown | null; receipt: unknown | null }>();
 const settings = {
@@ -88,6 +89,18 @@ function json(body: unknown, status = 200) {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+/** Mirrors the procurement_targets ready_since trigger. */
+function applyReadySinceTrigger(row: TargetRow, previousStatus: string | null) {
+  if (row.status === "READY") {
+    row.ready_since =
+      previousStatus === "READY"
+        ? (row.ready_since ?? new Date().toISOString())
+        : new Date().toISOString();
+  } else {
+    row.ready_since = null;
+  }
 }
 
 function matches(row: Record<string, unknown>, column: string, expr: string) {
@@ -273,7 +286,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         last_requested_amount: body.last_requested_amount ?? null,
         last_executable_discount_percent: body.last_executable_discount_percent ?? null,
         last_executable_total_usdg: body.last_executable_total_usdg ?? null,
+        ready_since: null,
       };
+      applyReadySinceTrigger(row, null);
       targets.push(row);
       return asObject ? json(row, 201) : json([row], 201);
     }
@@ -283,7 +298,11 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         return json({ code: "XX000", message: "target write failed", details: null, hint: null }, 500);
       }
       const patch = JSON.parse(String(init?.body)) as Partial<TargetRow>;
-      for (const row of found) Object.assign(row, patch);
+      for (const row of found) {
+        const previousStatus = row.status;
+        Object.assign(row, patch);
+        applyReadySinceTrigger(row, previousStatus);
+      }
       if (asObject) {
         if (found.length === 0) {
           return json(
@@ -294,6 +313,22 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         return json(found[0]);
       }
       return json(found);
+    }
+  }
+  if (url.host === "supabase.test" && url.pathname === "/rest/v1/target_alerts") {
+    if (method === "GET") return json(filterTable(alertRows, url));
+    if (method === "POST") {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      const conflict = alertRows.some(
+        (row) =>
+          row.target_id === body.target_id &&
+          row.ready_since === body.ready_since &&
+          row.channel === body.channel,
+      );
+      if (conflict) return json([], 201);
+      const row = { sent_at: null, created_at: new Date().toISOString(), ...body };
+      alertRows.push(row);
+      return json([row], 201);
     }
   }
   if (url.host === "supabase.test" && url.pathname === "/rest/v1/market_observations") {
@@ -440,6 +475,7 @@ function reset() {
   failingQuotes = new Set();
   failingTargetWrites = new Set();
   observationRows = [];
+  alertRows = [];
   head = 1;
   chain.clear();
   settings.spending_limit_usdg = 25;
@@ -955,8 +991,12 @@ function seedTarget(id: string, overrides: Partial<TargetRow> = {}): TargetRow {
     last_requested_amount: null,
     last_executable_discount_percent: null,
     last_executable_total_usdg: null,
+    ready_since: null,
     ...overrides,
   };
+  if (row.status === "READY" && row.ready_since == null) {
+    row.ready_since = row.last_evaluated_at;
+  }
   targets.push(row);
   return row;
 }
@@ -1101,8 +1141,13 @@ reset();
   );
   assert(targets[0].status === "READY", "successful observation evaluates open targets");
   assert(targets[1].status === "WATCHING", "failed target write leaves that target as it was");
+  assert(
+    alertRows.length === 1 && alertRows[0].target_id === "tgt-ok",
+    "scheduled observation records one alert for the target it made READY",
+  );
   const duplicate = (await (await observe()).json()) as Record<string, unknown>;
   assert(duplicate.status === "duplicate", "duplicate scheduler call does not re-evaluate");
+  assert(alertRows.length === 1, "duplicate scheduler call records no alert");
 }
 
 // In-flight purchase: awaiting_signature and pending targets are left alone.

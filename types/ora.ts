@@ -142,6 +142,8 @@ export type ProcurementTarget = {
   lastRequestedAmount?: number;
   lastExecutableDiscountPercent?: number;
   lastExecutableTotalUsdg?: number;
+  /** Start of the current READY period. Maintained by the database. */
+  readySince?: string;
 };
 
 export type OutcomePhase = "decision" | "execution" | "confirmed" | "outcome";
