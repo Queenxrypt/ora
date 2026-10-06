@@ -30,6 +30,7 @@
     "test:target-flow": "tsx lib/ora/target-flow.check.ts",
     "test:alerts": "tsx lib/ora/alerts/ready-alert.check.ts",
     "test:telegram": "tsx lib/telegram/link.check.ts",
+    "test:telegram-delivery": "tsx lib/telegram/notify.check.ts",
     "telegram:webhook": "tsx src/telegram-webhook.ts"
   },
   "dependencies": {

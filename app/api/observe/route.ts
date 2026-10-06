@@ -13,6 +13,9 @@ import {
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
+/** Telegram notifications must finish this long after the request starts. */
+const NOTIFICATION_DEADLINE_MS = 25_000;
+
 const NO_STORE = { "Cache-Control": "no-store" };
 
 function respond(body: Record<string, unknown>, status = 200) {
@@ -36,6 +39,7 @@ function message(error: unknown): string {
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
   if (!authorized(request)) {
     return respond({ error: "Unauthorized." }, 401);
   }
@@ -82,6 +86,13 @@ export async function GET(request: Request) {
         message(error),
       );
     }
+  }
+
+  try {
+    const { deliverTelegramNotifications } = await import("../../../lib/telegram/notify");
+    await deliverTelegramNotifications({ deadline: startedAt + NOTIFICATION_DEADLINE_MS });
+  } catch (error) {
+    console.error("Telegram notifications after observation failed:", message(error));
   }
 
   return respond({ slotStart, outcome: result.outcome });

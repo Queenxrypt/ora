@@ -137,12 +137,14 @@ Copy `.env.example` to `.env.local` for local runs. Keep secret values out of th
 | `ROBINHOOD_RPC_URL` | Robinhood Chain RPC. Defaults to `https://rpc.mainnet.chain.robinhood.com`. |
 | `ORBIO_MARKET_ORIGIN` | Origin for the CREDIT order book. Defaults to `https://www.orbio.so`. |
 | `ORBIO_REASONING_MODEL` | Reasoning model id. Defaults to `google/gemini-3.8-flash` when unset. |
-| `TELEGRAM_BOT_TOKEN` | Server-side Telegram bot token. Used only by the manual `npm run telegram:webhook` helper; Ora does not send messages yet. |
+| `TELEGRAM_BOT_TOKEN` | Server-side Telegram bot token. Used to send READY alerts and by the manual `npm run telegram:webhook` helper. Never sent to the browser. |
 | `TELEGRAM_BOT_USERNAME` | Bot username (without `@`) used to build the one-time `t.me` link. Connect Telegram stays unavailable when unset. |
 | `TELEGRAM_WEBHOOK_SECRET` | 32–256 characters of `A-Z a-z 0-9 _ -`. Telegram sends it in `X-Telegram-Bot-Api-Secret-Token`; the webhook rejects every request when it is unset. |
-| `TELEGRAM_ALERTS_ENABLED` | Reserved for alert delivery. Keep `false`; nothing is sent in this version. |
+| `TELEGRAM_ALERTS_ENABLED` | Set to `true` to send READY alerts. Any other value, or a missing bot token, keeps delivery off. |
 
 Telegram linking: the wallet signs a server-issued message that authorizes no transaction, spending or purchase. Ora then returns a one-time link that expires after 10 minutes. The link is created only when Telegram delivers `/start <token>` to the authenticated webhook from a private chat. `/stop` in that chat disconnects it. Register the webhook explicitly with `npm run telegram:webhook -- set`; with no argument the helper only reads the current webhook.
+
+Telegram READY alerts: the scheduled observation sends at most 10 per run. Before sending, Ora checks that the target is still READY in the same READY period and that the wallet still has an active Telegram link. The message is informational, and its Open Ora button links to `/app#targets`. Telegram cannot review or buy anything. Delivery failures never affect observation or target evaluation.
 
 ORBIO_API_KEY is required for Ora's Orbio reasoning layer. The deterministic procurement rule remains available if the reasoning service is temporarily unavailable.
 

@@ -336,8 +336,9 @@ await check("1. challenge creation stores the exact signed message", async () =>
   assert(row.wallet_address === walletOf(ALICE), "wallet normalized");
   assert(/^[0-9a-f]{32}$/.test(row.nonce), "nonce is 128-bit hex");
   assert(row.verified_at == null && row.token_hash == null, "nothing verified yet");
-  const ttl = Date.parse(row.expires_at) - before;
-  assert(ttl > LINK_CHALLENGE_TTL_MS - 5_000 && ttl <= LINK_CHALLENGE_TTL_MS + 1_000, "10 min expiry");
+  const issuedAt = Date.parse(/Issued At: (\S+)/.exec(c.message)?.[1] ?? "");
+  assert(issuedAt >= before && issuedAt <= Date.now(), "issued during the request");
+  assert(Date.parse(row.expires_at) - issuedAt === LINK_CHALLENGE_TTL_MS, "10 min expiry");
   for (const needle of [
     "Link Telegram alerts to Ora",
     `Wallet: ${walletOf(ALICE)}`,
@@ -672,9 +673,17 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-await check("21. no sendMessage call exists", async () => {
+await check("21. linking never sends; Bot API calls are confined to the alert sender", async () => {
+  const sender = join("lib", "telegram", "send.ts");
+  const delivery = new Set([
+    sender,
+    join("lib", "telegram", "delivery-config.ts"),
+    join("lib", "telegram", "notify.ts"),
+  ]);
   const files = [
-    ...sourceFiles(join("lib", "telegram")).filter((path) => !path.endsWith(".check.ts")),
+    ...sourceFiles(join("lib", "telegram")).filter(
+      (path) => !path.endsWith(".check.ts") && !delivery.has(path),
+    ),
     ...sourceFiles(join("app", "api", "telegram")),
     join("lib", "db", "telegram.ts"),
     join("components", "TelegramAlerts.tsx"),
@@ -688,6 +697,9 @@ await check("21. no sendMessage call exists", async () => {
       assert(!/api\.telegram\.org|TELEGRAM_BOT_TOKEN/.test(source), `${path} never calls the Bot API`);
     }
   }
+  const senderSource = readFileSync(sender, "utf8");
+  assert((senderSource.match(/api\.telegram\.org/g) ?? []).length === 1, "sender has one Bot API call");
+  assert(!/TELEGRAM_BOT_TOKEN/.test(senderSource), "sender receives the token, it does not read env");
   const webhookResponse = await webhook(message("/stop", CHAT_C));
   assert(!("method" in webhookResponse.body), "webhook reply is not a Bot API method call");
   assert(outbound.length === 0, "no request ever left for Telegram");
@@ -705,7 +717,6 @@ await check("22. Stage 1 and procurement files are unchanged", () => {
     "lib/ora/target.ts",
     "lib/ora/quote-rule.ts",
     "lib/orbio",
-    "app/api/observe",
     "app/api/targets",
     "app/api/execute",
     "app/api/quote",
@@ -723,6 +734,13 @@ await check("22. Stage 1 and procurement files are unchanged", () => {
     { encoding: "utf8" },
   ).trim();
   assert(untracked === "", `new files in protected paths:\n${untracked}`);
+
+  const observe = readFileSync(join("app", "api", "observe", "route.ts"), "utf8");
+  const evaluation = observe.indexOf("evaluateOpenTargetsAfterObservation(result.book)");
+  const notify = observe.indexOf("deliverTelegramNotifications(");
+  assert(evaluation > 0 && notify > evaluation, "observe evaluates targets before Telegram notifications");
+  assert(/try \{\s*const \{ deliverTelegramNotifications \}/.test(observe), "notifications isolated in try/catch");
+  assert(observe.includes("export const maxDuration = 30;"), "observe maxDuration unchanged");
 });
 
 console.log(`\n${passed} telegram link checks passed`);
