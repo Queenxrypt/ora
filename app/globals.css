@@ -1717,6 +1717,14 @@ a.btn:hover {
   margin-top: 12px;
 }
 
+.target-body > .command-readiness.buy {
+  color: var(--buy);
+}
+
+.target-body .procurement-value {
+  color: var(--ink);
+}
+
 .fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
